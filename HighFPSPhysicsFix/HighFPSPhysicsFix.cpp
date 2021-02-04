@@ -202,7 +202,7 @@ void getinisettings() {
 	if (ingamefps > 0 && fpslimit) {
 		limitgame = true;
 		fpslimitgame = 1.0 / ingamefps;
-		os << ingamefps << "FPS / " << fpslimitgame << "ms";
+		os << ingamefps << "FPS / " << fpslimitgame * 1000.0 << "ms";
 		if (vsync) {
 			vsync = false;
 			os << " (VSync will be disabled), ";
@@ -215,7 +215,7 @@ void getinisettings() {
 		if (loadscreenfps > 0 && fpslimit) {
 			limitload = true;
 			fpslimitload = 1.0 / loadscreenfps;
-			os << loadscreenfps << "FPS / " << fpslimitload << "ms";
+			os << loadscreenfps << "FPS / " << fpslimitload * 1000.0 << "ms";
 		}
 		else {
 			os << "disabled";
@@ -229,7 +229,7 @@ void getinisettings() {
 	if (LockpickingFPS > 0) {
 		FixLockpickingSound = true;
 		fpslockpicking = 1.0 / LockpickingFPS;
-		os << LockpickingFPS << "FPS / " << fpslockpicking << "ms";
+		os << LockpickingFPS << "FPS / " << fpslockpicking * 1000.0 << "ms";
 	}
 	else {
 		FixLockpickingSound = false;
