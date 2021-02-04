@@ -5,10 +5,8 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="config.h" />
-    <ClInclude Include="D3D11.h" />
-  </ItemGroup>
-  <ItemGroup>
-    <Library Include="libMinHook-x64-v141-mdd.lib" />
+    <ClInclude Include="PerfCounter.cpp" />
+    <ClInclude Include="PerfCounter.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="exports.def" />

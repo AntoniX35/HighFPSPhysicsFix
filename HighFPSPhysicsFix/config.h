@@ -5,9 +5,9 @@
 // Plugin Information
 //-----------------------
 #define PLUGIN_VERSION              14
-#define PLUGIN_VERSION_STRING       "0.4.0"
+#define PLUGIN_VERSION_STRING       "0.7.4"
 #define PLUGIN_NAME_SHORT           "HighFPSPhysicsFix"
-#define PLUGIN_NAME_LONG            "HighFPSPhysicsFix"
+#define PLUGIN_NAME_LONG            "High FPS Physics Fix"
 #define SUPPORTED_RUNTIME_VERSION   CURRENT_RELEASE_RUNTIME
 #define MINIMUM_RUNTIME_VERSION     RUNTIME_VERSION_1_10_163
 #define COMPATIBLE(runtimeVersion)  (runtimeVersion == SUPPORTED_RUNTIME_VERSION)

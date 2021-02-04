@@ -10,8 +10,6 @@
 #include <sstream> 
 #include <time.h>
 #include "common/IDebugLog.h"
-#include <d3d11.h>
-#include <MinHook.h>
 #include <chrono>
 #include <algorithm>
 #include <ratio>
@@ -19,33 +17,47 @@
 #include <psapi.h>
 #include <mutex>
 #include <TlHelp32.h>
+#include "PerfCounter.h"
+
 #pragma comment(lib, "psapi.lib")
-#pragma comment(lib, "winmm.lib")
-#pragma comment(lib, "libMinHook-x64-v141-mdd.lib")
-#pragma comment(lib, "d3d11.lib")
+
+float GetPrivateProfileFloat(LPCSTR lpAppName, LPCSTR lpKeyName, FLOAT flDefault, LPCSTR lpFileName)
+{
+	char szData[32];
+
+	GetPrivateProfileStringA(lpAppName, lpKeyName, std::to_string(flDefault).c_str(), szData, 32, lpFileName);
+
+	return (float)atof(szData);
+}
 
 //Ini File
 #define INI_FILE "data\\F4SE\\Plugins\\HighFPSPhysicsFix.ini"
 
 bool firstload = true;
-int isLockpicking, isLoading, NumOfThreadsWhileLoading, NumOfThreadsAfterLoad, fpslimit, isLimiting, iPresentIntervalDuringLockpicking;
+int isLockpicking, isLoading, NumOfThreadsWhileLoading, NumOfThreadsWhileLoadingNewGame, fpslimit, isLimiting;
 unsigned int nMaxProcessorMask;
+unsigned int nMaxProcessorMaskNG;
 unsigned int nMaxProcessorAfterLoad;
-bool FixLockpickingSound, accelerateLoading, vsync, UntieSpeedFromFPS, JumpFix, FixWorkshopRotationSpeed, FixRotationSpeed, FixStuckAnimation, limitload, limitgame, LimitCPUthreads, DisableAnimationOnLoadingScreens, LimitLockpicking, DisableBlackLoadingScreens;
-float newvalue, fpsvalue, newvalue2, newvalue3, newvalue4, newvalue5, newvalue6, fpslimitgame, fpslimitload, fpslockpicking, FixMovingItems, fTime;
-__int64	TimeAddress;
-RelocAddr<uintptr_t> RotationSpeedAddress(0x2C16761);
-RelocAddr<uintptr_t> RotationSpeedXAddress(0x12447AC);
-RelocAddr<uintptr_t> RotationSpeedYAddress(0x1244850);
-RelocAddr<uintptr_t> WorkshopRotationSpeedAddress(0x2C16791);
-bool PluginLoadCompleted = false;
-bool PluginLoadCompleted2 = false;
+bool FixLockpickingSound, accelerateLoading, vsync, UntieSpeedFromFPS, DisableiFPSClamp, FixStuttering, FixWorkshopRotationSpeed, FixRotationSpeed, FixStuckAnimation, limitload, limitgame, LimitCPUThreadsNG, DisableAnimationOnLoadingScreens, DisableBlackLoadingScreens, FixWindSpeed, FixWhiteScreen, FixLoadingModel, ReduceAfterLoading, FixCPUThreads, OnlyOnLoadingScreens, WriteLoadingTime;
+float fpslimitgame, fpslimitload, fpslockpicking, SittingRotSpeedX, SittingRotSpeedY, PostloadingMenuSpeed;
+__int64	TimeAddress, fFirstPersonSittingRotationSpeedX, fFirstPersonSittingRotationSpeedY;
+PerfCounter PerfCounter::m_Instance;
+long long PerfCounter::perf_freq;
+float PerfCounter::perf_freqf;
+RelocAddr<uintptr_t> PostloadingMenuSpeedAddress(0x126DAEB);
+RelocAddr<uintptr_t> SittingRotationSpeedXAddress(0x3804738);
+RelocAddr<uintptr_t> SittingRotationSpeedYAddress(0x3804750);
+RelocAddr<uintptr_t> FixCPUThreadsAddress(0x1B10D59);
+RelocAddr<uintptr_t> FixCPUThreadsOnLoaddingAddress(0x18C62F);
+
+long long CurrentFPS, FPSui, loadingFPSmax, lockpickingFPSmax, timing;
+RelocAddr<uintptr_t> FPSLimiter(0x1D0B67E);
+
 HANDLE f4handle = NULL;
 double maxft, minft;
 bool GetProcess(HWND hWnd);
 
 
-//bool firstTime = true;
 int iPresentInterval0 = 0;
 int iPresentInterval1 = 1;
 F4SEScaleformInterface* g_scaleform = NULL;
@@ -56,13 +68,10 @@ static F4SEPapyrusInterface* g_papyrus = NULL;
 
 typedef void(*_ChangeThreads)(void* unk1, void* unk2, void* unk3, void* unk4);
 _ChangeThreads ChangeThreads_Original = nullptr;
-typedef void(*_UpdateValues)(void* unk1, void* unk2, void* unk3, void* unk4);
-_UpdateValues UpdateValues_Original = nullptr;
-typedef void(*_UpdateSValues)(void* unk1, void* unk2, void* unk3, void* unk4);
-_UpdateSValues UpdateSValues_Original = nullptr;
-typedef void(*_UpdateWValues)(void* unk1, void* unk2, void* unk3, void* unk4);
-_UpdateWValues UpdateWValues_Original = nullptr;
-
+typedef void(*_ChangeThreadsNewGame)(void* unk1, void* unk2, void* unk3, void* unk4);
+_ChangeThreadsNewGame ChangeThreadsNewGame_Original = nullptr;
+typedef void(*_ReturnThreadsNewGame)(void* unk1, void* unk2, void* unk3, void* unk4);
+_ReturnThreadsNewGame ReturnThreadsNewGame_Original = nullptr;
 
 class MenuOpenCloseHandler : public BSTEventSink<MenuOpenCloseEvent>
 	{
@@ -80,28 +89,38 @@ std::string ToLowerStr(std::string str)
 std::chrono::high_resolution_clock::time_point tlastf = std::chrono::high_resolution_clock::now(), tcurrentf = std::chrono::high_resolution_clock::now(), hvlast = std::chrono::high_resolution_clock::now(), hvcurrent = std::chrono::high_resolution_clock::now();
 std::chrono::duration<double> time_span, tdif;
 
-void GetRefreshRate() {
-	HDC hDCScreen = GetDC(NULL);
-	int RefreshFequency = GetDeviceCaps(hDCScreen, VREFRESH);
-	ReleaseDC(NULL, hDCScreen);
-	if (RefreshFequency <= 90) {
-		iPresentIntervalDuringLockpicking = 1;
-	}
-	if (RefreshFequency >= 90 && RefreshFequency < 150) {
-		iPresentIntervalDuringLockpicking = 2;
-	}
-	if (RefreshFequency >= 150 && RefreshFequency < 210) {
-		iPresentIntervalDuringLockpicking = 3;
-	}
-	if (RefreshFequency >= 210) {
-		iPresentIntervalDuringLockpicking = 4;
-	}
-}
-
 void getinisettings() {
 	char buf[256];
 	std::string value;
 	std::ostringstream os;
+	
+	os << "\nUntie game speed from framerate: ";
+
+	//Fix game speed
+	GetPrivateProfileString("Main", "UntieSpeedFromFPS", "true", buf, sizeof(buf), INI_FILE);
+	value = ToLowerStr(buf);
+	if (value == "true") {
+		UntieSpeedFromFPS = true;
+		os << "enabled";
+	}
+	else {
+		UntieSpeedFromFPS = false;
+		os << "disabled";
+	}
+
+	os << "\nDisable iFPSClamp: ";
+
+	//Disable iFPSClamp
+	GetPrivateProfileString("Main", "DisableiFPSClamp", "true", buf, sizeof(buf), INI_FILE);
+	value = ToLowerStr(buf);
+	if (value == "true") {
+		DisableiFPSClamp = true;
+		os << "enabled";
+	}
+	else {
+		DisableiFPSClamp = false;
+		os << "disabled";
+	}
 
 	os << "\nVSync (in Game): ";
 
@@ -114,19 +133,6 @@ void getinisettings() {
 	}
 	else {
 		vsync = false;
-		os << "disabled";
-	}
-
-	os << "\nProcessWindowGhosting: ";
-
-	//Ghosting
-	GetPrivateProfileString("Main", "DisableProcessWindowsGhosting", "false", buf, sizeof(buf), INI_FILE);
-	value = ToLowerStr(buf);
-	if (value == "true") {
-		DisableProcessWindowsGhosting();
-		os << "enabled";
-	}
-	else {
 		os << "disabled";
 	}
 
@@ -144,10 +150,75 @@ void getinisettings() {
 		os << "enabled";
 	}
 
+	os << "\nProcessWindowGhosting: ";
+
+	//Ghosting
+	GetPrivateProfileString("Main", "DisableProcessWindowsGhosting", "false", buf, sizeof(buf), INI_FILE);
+	value = ToLowerStr(buf);
+	if (value == "true") {
+		DisableProcessWindowsGhosting();
+		os << "enabled";
+	}
+	else {
+		os << "disabled";
+	}
+
+	//Limiters
+
+	float ingamefps = GetPrivateProfileFloat("Limiter", "InGameFPS", 0, INI_FILE);
+	os << "\nLimit(ingame): ";
+	if (ingamefps > 0) {
+		limitgame = true;
+		fpslimitgame = 1.0 / ingamefps;
+		os << ingamefps << "FPS / " << fpslimitgame * 1000.0 << "ms";
+	}
+	else {
+		os << "disabled, ";
+	}
+
+	float loadscreenfps = GetPrivateProfileFloat("Limiter", "LoadingScreenFPS", 0, INI_FILE);
+	os << " Limit(loading): ";
+	if (accelerateLoading) {
+		if (loadscreenfps > 0) {
+			limitload = true;
+			fpslimitload = 1.0 / loadscreenfps;
+			os << loadscreenfps << "FPS / " << fpslimitload * 1000.0 << "ms";
+		}
+		else {
+			os << "disabled";
+		}
+	}
+	else os << "disabled";
+
+	//Fix mouse sensitivity during lockpicking
+	float LockpickingFPS = GetPrivateProfileFloat("Limiter", "LockpickingFPS", 0, INI_FILE);
+	os << "\nLimit lockpicking: ";
+	if (LockpickingFPS > 0) {
+		FixLockpickingSound = true;
+		fpslockpicking = 1.0 / LockpickingFPS;
+		os << LockpickingFPS << "FPS / " << fpslockpicking * 1000.0 << "ms";
+	}
+	else {
+		FixLockpickingSound = false;
+		os << "disabled";
+	}
+
+	//Limit threads on loading screens (starting a new game)
+	NumOfThreadsWhileLoadingNewGame = GetPrivateProfileIntA("Limiter", "NumOfThreadsWhileLoadingNewGame", 1, INI_FILE);
+	os << "\nNum of threads on loading screens (new game): ";
+	if (NumOfThreadsWhileLoadingNewGame > 0) {
+		os << NumOfThreadsWhileLoadingNewGame;
+		LimitCPUThreadsNG = true;
+	}
+	else {
+		LimitCPUThreadsNG = false;
+		os << "default";
+	}
+
 	os << "\nLoading screens: ";
 
 	//Loading screen with 3D model
-	GetPrivateProfileString("Main", "DisableBlackLoadingScreens", "false", buf, sizeof(buf), INI_FILE);
+	GetPrivateProfileString("Limiter", "DisableBlackLoadingScreens", "false", buf, sizeof(buf), INI_FILE);
 	value = ToLowerStr(buf);
 	if (value == "true") {
 		DisableBlackLoadingScreens = true;
@@ -161,7 +232,7 @@ void getinisettings() {
 	os << "\nDisable animation on loading screens: ";
 
 	//Disable loading screens
-	GetPrivateProfileString("Main", "DisableAnimationOnLoadingScreens", "false", buf, sizeof(buf), INI_FILE);
+	GetPrivateProfileString("Limiter", "DisableAnimationOnLoadingScreens", "false", buf, sizeof(buf), INI_FILE);
 	value = ToLowerStr(buf);
 	if (value == "true") {
 		DisableAnimationOnLoadingScreens = true;
@@ -172,95 +243,102 @@ void getinisettings() {
 		os << "disabled";
 	}
 
-	//Limit threads on loading screens
-	NumOfThreadsWhileLoading = GetPrivateProfileIntA("Main", "NumOfThreadsWhileLoading", 3, INI_FILE);
-	os << "\nNum of threads on loading screens: ";
-	if (NumOfThreadsWhileLoading > 0 && !DisableAnimationOnLoadingScreens && !DisableBlackLoadingScreens) {
-		os << NumOfThreadsWhileLoading;
-		LimitCPUthreads = true;
+	os << "\nPostloading menu speed: ";
+
+	//Postloading menu speed
+	PostloadingMenuSpeed = GetPrivateProfileFloat("Limiter", "PostloadingMenuSpeed", 1, INI_FILE);
+	if (PostloadingMenuSpeed != 1) {
+		os << PostloadingMenuSpeed;
+		ReduceAfterLoading = true;
 	}
 	else {
-		LimitCPUthreads = false;
+		ReduceAfterLoading = false;
 		os << "default";
 	}
 
-	//Limiters
-	GetPrivateProfileString("Limiter", "FPSLimit", "false", buf, sizeof(buf), INI_FILE);
-	value = ToLowerStr(buf);
-	os << "\nFPS limit: ";
-	if (value == "true") {
-		os << "enabled";
-		fpslimit = true;
-	}
-	else {
-		os << "disabled";
-	}
+	os << "\nFix CPU threads: ";
 
-	int ingamefps = GetPrivateProfileIntA("Limiter", "InGameFPS", 0, INI_FILE);
-	int loadscreenfps = GetPrivateProfileIntA("Limiter", "LoadingScreenFPS", 0, INI_FILE);
-	os << "\nLimit(ingame): ";
-	if (ingamefps > 0 && fpslimit) {
-		limitgame = true;
-		fpslimitgame = 1.0 / ingamefps;
-		os << ingamefps << "FPS / " << fpslimitgame * 1000.0 << "ms";
-		if (vsync) {
-			vsync = false;
-			os << " (VSync will be disabled), ";
-		}
-	}
-	else os << "disabled, ";
-
-	os << " Limit(loading): ";
-	if (accelerateLoading) {
-		if (loadscreenfps > 0 && fpslimit) {
-			limitload = true;
-			fpslimitload = 1.0 / loadscreenfps;
-			os << loadscreenfps << "FPS / " << fpslimitload * 1000.0 << "ms";
-		}
-		else {
-			os << "disabled";
-		}
-	}
-	else os << "disabled";
-
-	//Fix mouse sensitivity during lockpicking
-	int LockpickingFPS = GetPrivateProfileIntA("Limiter", "LockpickingFPS", 0, INI_FILE);
-	os << "\nLimit lockpicking: ";
-	if (LockpickingFPS > 0) {
-		FixLockpickingSound = true;
-		fpslockpicking = 1.0 / LockpickingFPS;
-		os << LockpickingFPS << "FPS / " << fpslockpicking * 1000.0 << "ms";
-	}
-	else {
-		FixLockpickingSound = false;
-		os << "disabled";
-	}
-
-	os << "\nUntie game speed from framerate: ";
-
-	//Fix game speed
-	GetPrivateProfileString("Fixes", "UntieSpeedFromFPS", "true", buf, sizeof(buf), INI_FILE);
+	//Fix CPU threads
+	GetPrivateProfileString("Fixes", "FixCPUThreads", "true", buf, sizeof(buf), INI_FILE);
 	value = ToLowerStr(buf);
 	if (value == "true") {
-		UntieSpeedFromFPS = true;
+		FixCPUThreads = true;
 		os << "enabled";
 	}
 	else {
-		UntieSpeedFromFPS = false;
+		FixCPUThreads = false;
 		os << "disabled";
 	}
 
-	os << "\nJump height fix: ";
+	os << "\nEnable limit threads only on loading screens: ";
 
-	//Fix Jump
-	GetPrivateProfileString("Fixes", "JumpFix", "true", buf, sizeof(buf), INI_FILE);
+	//Only on loading screens
+	GetPrivateProfileString("Fixes", "OnlyOnLoadingScreens", "true", buf, sizeof(buf), INI_FILE);
 	value = ToLowerStr(buf);
 	if (value == "true") {
-		JumpFix = true;
+		os << "enabled";
+		if (FixCPUThreads) {
+			OnlyOnLoadingScreens = true;
+		}
+	}
+	else {
+		OnlyOnLoadingScreens = false;
+		os << "disabled";
+	}
+
+	os << "\nWrite loading time to log: ";
+
+	//Write loading time to log
+	GetPrivateProfileString("Fixes", "WriteLoadingTime", "false", buf, sizeof(buf), INI_FILE);
+	value = ToLowerStr(buf);
+	if (value == "true") {
+		os << "enabled";
+		WriteLoadingTime = true;
+	}
+	else {
+		WriteLoadingTime = false;
+		os << "disabled";
+	}
+
+	os << "\nFix stuttering: ";
+
+	//Fix game stuttering
+	GetPrivateProfileString("Fixes", "FixStuttering", "true", buf, sizeof(buf), INI_FILE);
+	value = ToLowerStr(buf);
+	if (value == "true") {
+		FixStuttering = true;
 		os << "enabled";
 	}
 	else {
-		JumpFix = false;
+		FixStuttering = false;
+		os << "disabled";
+	}
+
+	os << "\nFix white screen: ";
+
+	//Fix white screen
+	GetPrivateProfileString("Fixes", "FixWhiteScreen", "true", buf, sizeof(buf), INI_FILE);
+	value = ToLowerStr(buf);
+	if (value == "true") {
+		FixWhiteScreen = true;
+		os << "enabled";
+	}
+	else {
+		FixWhiteScreen = false;
+		os << "disabled";
+	}
+
+	os << "\nFix wind speed: ";
+
+	//Fix wind speed
+	GetPrivateProfileString("Fixes", "FixWindSpeed", "true", buf, sizeof(buf), INI_FILE);
+	value = ToLowerStr(buf);
+	if (value == "true") {
+		FixWindSpeed = true;
+		os << "enabled";
+	}
+	else {
+		FixWindSpeed = false;
 		os << "disabled";
 	}
 
@@ -292,6 +370,20 @@ void getinisettings() {
 		os << "disabled";
 	}
 
+	os << "\nFix loading model: ";
+
+	//Fix workshop rotation speed
+	GetPrivateProfileString("Fixes", "FixLoadingModel", "true", buf, sizeof(buf), INI_FILE);
+	value = ToLowerStr(buf);
+	if (value == "true") {
+		FixLoadingModel = true;
+		os << "enabled";
+	}
+	else {
+		FixLoadingModel = false;
+		os << "disabled";
+	}
+
 	os << "\nFix stuck animation: ";
 
 	//Fix stuck animation
@@ -305,91 +397,7 @@ void getinisettings() {
 		FixStuckAnimation = false;
 		os << "disabled";
 	}
-
-	//Limit threads on loading screens
-	iPresentIntervalDuringLockpicking = GetPrivateProfileIntA("Fixes", "iPresentIntervalDuringLockpicking", 3, INI_FILE);
-	os << "\niPresentInterval during lockpicking: ";
-	if (iPresentIntervalDuringLockpicking >= 0) {
-		os << iPresentIntervalDuringLockpicking;
-		LimitLockpicking = true;
-		if (iPresentIntervalDuringLockpicking == 0) {
-			GetRefreshRate();
-		}
-	}
-	else {
-		LimitLockpicking = false;
-		os << "default";
-	}
 	_MESSAGE(os.str().c_str());
-}
-
-void updatemaxtime() {
-	if (!PluginLoadCompleted) {
-		_MESSAGE("Plugin load completed!");
-		PluginLoadCompleted = true;
-	}
-	newvalue = tdif.count();
-	if (FixRotationSpeed) {
-		newvalue4 = newvalue * 3;  //RotationSpeed
-		newvalue5 = newvalue / 0.1666;  //fFirstPersonSittingRotationSpeedX
-		newvalue6 = newvalue5 / 2;  //fFirstPersonSittingRotationSpeedY
-		SafeWriteBuf(RotationSpeedAddress.GetUIntPtr(), &newvalue4, sizeof(float));
-		SafeWriteBuf(RotationSpeedXAddress.GetUIntPtr(), &newvalue5, sizeof(float));
-		SafeWriteBuf(RotationSpeedYAddress.GetUIntPtr(), &newvalue6, sizeof(float));
-	}
-	if (FixWorkshopRotationSpeed) {
-		newvalue2 = newvalue * 1.0472;
-		SafeWriteBuf(WorkshopRotationSpeedAddress.GetUIntPtr(), &newvalue2, sizeof(float));
-	}
-}
-
-typedef HRESULT(__stdcall* D3D11PresentHook) (IDXGISwapChain* opSwapChain, UINT SyncInterval, UINT Flags);
-D3D11PresentHook phookD3D11Present = NULL;
-
-HRESULT __stdcall hookD3D11Present(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Flags)
-{
-	if (isLoading == 1 && isLockpicking == 0) {
-		if (limitload) {
-			time_span = std::chrono::duration_cast<std::chrono::duration<double>>(tcurrentf - tlastf);
-			while (time_span.count() < fpslimitload) {
-				tcurrentf = std::chrono::high_resolution_clock::now();
-				time_span = std::chrono::duration_cast<std::chrono::duration<double>>(tcurrentf - tlastf);
-			}
-			tlastf = std::chrono::high_resolution_clock::now();
-		}
-	}
-	else {
-		if (limitgame && isLockpicking == 0) {
-			time_span = std::chrono::duration_cast<std::chrono::duration<double>>(tcurrentf - tlastf);
-			while (time_span.count() < fpslimitgame) {
-				tcurrentf = std::chrono::high_resolution_clock::now();
-				time_span = std::chrono::duration_cast<std::chrono::duration<double>>(tcurrentf - tlastf);
-			}
-			tlastf = std::chrono::high_resolution_clock::now();
-		}
-	}
-	updatemaxtime();
-	if (isLockpicking == 1) {
-		time_span = std::chrono::duration_cast<std::chrono::duration<double>>(tcurrentf - tlastf);
-		while (time_span.count() < fpslockpicking) {
-			tcurrentf = std::chrono::high_resolution_clock::now();
-			time_span = std::chrono::duration_cast<std::chrono::duration<double>>(tcurrentf - tlastf);
-		}
-		tlastf = std::chrono::high_resolution_clock::now();
-	}
-
-	hvlast = std::chrono::high_resolution_clock::now();
-	tdif = std::chrono::duration_cast<std::chrono::duration<double>>(hvlast - hvcurrent);
-	hvcurrent = std::chrono::high_resolution_clock::now();
-
-	if (vsync) {
-		if (isLoading == 1 && accelerateLoading) return phookD3D11Present(pSwapChain, 0, Flags);
-		return phookD3D11Present(pSwapChain, 1, Flags);
-	}
-	else {
-		if (isLoading == 1 && !accelerateLoading) return phookD3D11Present(pSwapChain, 1, Flags);
-		return phookD3D11Present(pSwapChain, 0, Flags);
-	}
 }
 
 static BOOL CALLBACK enumWindowCallback(HWND hWnd, LPARAM lparam) {
@@ -450,177 +458,54 @@ bool GetProcess(HWND hWnd) {
 	f4handle = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
 	if (!f4handle) return false;
 	TimeAddress = baseadd + 0x5B5B6D0;
+	fFirstPersonSittingRotationSpeedX = baseadd + 0x3804738;
+	fFirstPersonSittingRotationSpeedY = baseadd + 0x3804750;
 	return true;
 }
 
 void GetProcId() {
 	EnumWindows(enumWindowCallback, NULL);
-	nMaxProcessorMask = (1 << NumOfThreadsWhileLoading) - 1;
+	nMaxProcessorMaskNG = (1 << NumOfThreadsWhileLoadingNewGame) - 1;
 	SYSTEM_INFO SystemInfo;
 	GetSystemInfo(&SystemInfo);
 	nMaxProcessorAfterLoad = (1 << SystemInfo.dwNumberOfProcessors) - 1;
 }
-//Create DeviceAndSwapChain
-bool CreateDeviceAndSwapChain() {
-	while (FindWindowA("Fallout4", NULL) == NULL) {
-		Sleep(10);
-	}
-	_MESSAGE("\nPreparing D3D Hook");
-	GetProcId();
-	IDXGISwapChain* pSwapChain;
-	D3D_FEATURE_LEVEL featureLevel = D3D_FEATURE_LEVEL_11_0;
-	DXGI_SWAP_CHAIN_DESC sd;
-	ZeroMemory(&sd, sizeof(sd));
-	sd.BufferCount = 1;
-	sd.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-	sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-	sd.OutputWindow = GetDesktopWindow();
-	sd.SampleDesc.Count = 1;
-	sd.Windowed = TRUE;//((GetWindowLong(hWnd, GWL_STYLE) & WS_POPUP) != 0) ? FALSE : TRUE;
-	sd.BufferDesc.ScanlineOrdering = DXGI_MODE_SCANLINE_ORDER_UNSPECIFIED;
-	sd.BufferDesc.Scaling = DXGI_MODE_SCALING_UNSPECIFIED;
-	sd.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
-	if (FAILED(D3D11CreateDeviceAndSwapChain(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, NULL, &featureLevel, 1
-		, D3D11_SDK_VERSION, &sd, &pSwapChain, NULL, NULL, NULL)))
-	{
-		_MESSAGE("Failed to CreateDeviceAndSwapChain");
-		return false;
-	}
-	DWORD_PTR* pVTable = (DWORD_PTR*)pSwapChain;
-	pVTable = (DWORD_PTR*)pVTable[0];
-	if (MH_Initialize() == MH_OK) {
-		//Present Hook
-		if (MH_CreateHook((DWORD_PTR*)pVTable[8], hookD3D11Present, reinterpret_cast<void**>(&phookD3D11Present)) == MH_OK) {
-			if (MH_EnableHook((DWORD_PTR*)pVTable[8]) == MH_OK) {
-				_MESSAGE("Function Hooked!");
-			}
-			else {
-				_MESSAGE("Error: Failed to hook Present!");
-				return false;
-			}
-		}
-		else {
-			_MESSAGE("Error: Failed to hook Present!");
-			return false;
-		}
-	}
-	else {
-		_MESSAGE("Error: Could not initialize MinHook!");
-		return false;
-	}
-	return true;
+
+void SetThreadsNewGame(void* unk1, void* unk2, void* unk3, void* unk4) {
+	SetProcessAffinityMask(f4handle, nMaxProcessorMaskNG);
+	ChangeThreadsNewGame_Original(unk1, unk2, unk3, unk4);
 }
 
-void SetThreads(void* unk1, void* unk2, void* unk3, void* unk4) {
-	if (isLoading == 1) {
-		SetProcessAffinityMask(f4handle, nMaxProcessorMask);
-		isLimiting = 1;
-	}
-	ChangeThreads_Original(unk1, unk2, unk3, unk4);
-}
-
-void UpdateRotationValue(void* unk1, void* unk2, void* unk3, void* unk4) {
-	ReadProcessMemory(f4handle, (PVOID*)TimeAddress, &fTime, sizeof(float), 0);
-	newvalue4 = fTime * 3;       //RotationSpeed
-	SafeWriteBuf(RotationSpeedAddress.GetUIntPtr(), &newvalue4, sizeof(float));
-	UpdateValues_Original(unk1, unk2, unk3, unk4);
-}
-
-void UpdateSitValues(void* unk1, void* unk2, void* unk3, void* unk4) {
-	ReadProcessMemory(f4handle, (PVOID*)TimeAddress, &fTime, sizeof(float), 0);
-	newvalue5 = fTime / 0.1666;  //fFirstPersonSittingRotationSpeedX
-	newvalue6 = fTime / 0.3332;   //fFirstPersonSittingRotationSpeedY
-	SafeWriteBuf(RotationSpeedXAddress.GetUIntPtr(), &newvalue5, sizeof(float));
-	SafeWriteBuf(RotationSpeedYAddress.GetUIntPtr(), &newvalue6, sizeof(float));
-	UpdateSValues_Original(unk1, unk2, unk3, unk4);
-}
-
-void UpdateWValues(void* unk1, void* unk2, void* unk3, void* unk4) {
-	ReadProcessMemory(f4handle, (PVOID*)TimeAddress, &fTime, sizeof(float), 0);
-	newvalue2 = fTime * 1.0472;
-	SafeWriteBuf(WorkshopRotationSpeedAddress.GetUIntPtr(), &newvalue2, sizeof(float));
-	UpdateWValues_Original(unk1, unk2, unk3, unk4);
+void ReturnThreadsNewGame(void* unk1, void* unk2, void* unk3, void* unk4) {
+	SetProcessAffinityMask(f4handle, nMaxProcessorAfterLoad);
+	ReturnThreadsNewGame_Original(unk1, unk2, unk3, unk4);
 }
 
 void HookFPS() {
 	if (!vsync) {
 		SafeWriteBuf(RelocAddr<uintptr_t>(0x61E0950).GetUIntPtr(), &iPresentInterval0, sizeof(iPresentInterval0));
 	}
-	if (FixRotationSpeed) {
-		struct UpdateValues_Code : Xbyak::CodeGenerator {
-			UpdateValues_Code(void* buf) : Xbyak::CodeGenerator(4096, buf)
-			{
-				Xbyak::Label retnLabel;
-
-				mov(ptr[rsp + 0x08], rbx);
-
-				jmp(ptr[rip + retnLabel]);
-
-				L(retnLabel);
-				dq(RelocAddr<uintptr_t>(0xF49540).GetUIntPtr() + 5);
-			}
-		};
-		void* codeBuf = g_localTrampoline.StartAlloc();
-		UpdateValues_Code code(codeBuf);
-		g_localTrampoline.EndAlloc(code.getCurr());
-
-		UpdateValues_Original = (_UpdateValues)codeBuf;
-
-		g_branchTrampoline.Write5Branch(RelocAddr<uintptr_t>(0xF49540).GetUIntPtr(), (uintptr_t)UpdateRotationValue);
+	if (DisableiFPSClamp) {
+		float clamp = 0;
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x5B5B6C8).GetUIntPtr(), &clamp, sizeof(float));
 	}
-	if (FixRotationSpeed) { //sitting
-		struct UpdateSValues_Code : Xbyak::CodeGenerator {
-			UpdateSValues_Code(void* buf) : Xbyak::CodeGenerator(4096, buf)
-			{
-				Xbyak::Label retnLabel;
-
-				push(rsi);
-				push(rdi);
-				sub(rsp, 0x28);
-
-				jmp(ptr[rip + retnLabel]);
-
-				L(retnLabel);
-				dq(RelocAddr<uintptr_t>(0xF443B0).GetUIntPtr() + 7);
-			}
-		};
-		void* codeBuf = g_localTrampoline.StartAlloc();
-		UpdateSValues_Code code(codeBuf);
-		g_localTrampoline.EndAlloc(code.getCurr());
-
-		UpdateSValues_Original = (_UpdateSValues)codeBuf;
-
-		g_branchTrampoline.Write5Branch(RelocAddr<uintptr_t>(0xF443B0).GetUIntPtr(), (uintptr_t)UpdateSitValues);
+	if (FixRotationSpeed) { 
+		//fix sitting X
+		ReadProcessMemory(f4handle, (PVOID*)fFirstPersonSittingRotationSpeedX, &SittingRotSpeedX, sizeof(float), 0);
+		ReadProcessMemory(f4handle, (PVOID*)fFirstPersonSittingRotationSpeedY, &SittingRotSpeedY, sizeof(float), 0);
+		SittingRotSpeedX = SittingRotSpeedX / 0.017;
+		SittingRotSpeedY = SittingRotSpeedY / 0.017;
+		SafeWriteBuf(SittingRotationSpeedXAddress.GetUIntPtr(), &SittingRotSpeedX, sizeof(float));
+		SafeWriteBuf(SittingRotationSpeedYAddress.GetUIntPtr(), &SittingRotSpeedY, sizeof(float));
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x12447AC).GetUIntPtr(), "\xF3\x0F\x59\x05\x20\x6F\x91\x04\xF3\x0F\x59\x40\x4C\xE9\x17\xFF\xFF\xFF", 18); //x
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x12446D0).GetUIntPtr(), "\xE9\xD7\x00\x00\x00", 5);
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x124484E).GetUIntPtr(), "\xF3\x0F\x59\x0D\x7E\x6E\x91\x04\xF3\x0F\x10\x43\x64\xE9\x8C\xFE\xFF\xFF", 18); //y
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x12446E7).GetUIntPtr(), "\xE9\x62\x01\x00\x00", 5);
 	}
-	if (FixWorkshopRotationSpeed) {
-		struct UpdateWValues_Code : Xbyak::CodeGenerator {
-			UpdateWValues_Code(void* buf) : Xbyak::CodeGenerator(4096, buf)
-			{
-				Xbyak::Label retnLabel;
-
-				mov(rax, rsp);
-				push(rbp);
-				push(r14);
-
-				jmp(ptr[rip + retnLabel]);
-
-				L(retnLabel);
-				dq(RelocAddr<uintptr_t>(0xBEFE80).GetUIntPtr() + 6);
-			}
-		};
-		void* codeBuf = g_localTrampoline.StartAlloc();
-		UpdateWValues_Code code(codeBuf);
-		g_localTrampoline.EndAlloc(code.getCurr());
-
-		UpdateWValues_Original = (_UpdateWValues)codeBuf;
-
-		g_branchTrampoline.Write5Branch(RelocAddr<uintptr_t>(0xBEFE80).GetUIntPtr(), (uintptr_t)UpdateWValues);
-	}
-	_MESSAGE("\nPlugin load completed!");
-	PluginLoadCompleted2 = true;
 }
+
+clock_t start, end;
 //Detect loading screen and lockpicking menu
-//clock_t start, end;
 EventResult	MenuOpenCloseHandler::ReceiveEvent(MenuOpenCloseEvent* evn, void* dispatcher)
 {
 	if (!_strcmpi("LoadingMenu", evn->menuName.c_str())\
@@ -628,17 +513,25 @@ EventResult	MenuOpenCloseHandler::ReceiveEvent(MenuOpenCloseEvent* evn, void* di
 	{
 		if (evn->isOpen)
 		{
-			//start = clock();
-			isLoading = 1;
+			if (WriteLoadingTime) {
+				start = clock();
+			}
 			if (accelerateLoading) {
+				CurrentFPS = loadingFPSmax;
+				isLoading = 1;
 				SafeWriteBuf(RelocAddr<uintptr_t>(0x61E0950).GetUIntPtr(), &iPresentInterval0, sizeof(iPresentInterval0));
 			}
 		}
 		else
 		{
-			isLoading = 0;
-			//end = clock();
-			//_MESSAGE("Loading time: %.0f second(s)", ((double)end - start) / ((double)CLOCKS_PER_SEC));
+			if (accelerateLoading) {
+				CurrentFPS = FPSui;
+				isLoading = 0;
+			}
+			if (WriteLoadingTime) {
+				end = clock();
+				_MESSAGE("Loading time: %.0f second(s)", ((double)end - start) / ((double)CLOCKS_PER_SEC));
+			}
 			if (isLimiting == 1) {
 				SetProcessAffinityMask(f4handle, nMaxProcessorAfterLoad);
 				isLimiting = 0;
@@ -657,15 +550,16 @@ EventResult	MenuOpenCloseHandler::ReceiveEvent(MenuOpenCloseEvent* evn, void* di
 		if (evn->isOpen)
 		{
 			if (FixLockpickingSound) {
+				CurrentFPS = lockpickingFPSmax;
 				isLockpicking = 1;
-			}
-			if (LimitLockpicking) {
-				SafeWriteBuf(RelocAddr<uintptr_t>(0x61E0950).GetUIntPtr(), &iPresentIntervalDuringLockpicking, sizeof(iPresentIntervalDuringLockpicking));
 			}
 		}
 		else
 		{
-			isLockpicking = 0;
+			if (FixLockpickingSound) {
+				CurrentFPS = FPSui;
+				isLockpicking = 0;
+			}
 			if (!vsync) {
 				SafeWriteBuf(RelocAddr<uintptr_t>(0x61E0950).GetUIntPtr(), &iPresentInterval0, sizeof(iPresentInterval0));
 			}
@@ -677,28 +571,189 @@ EventResult	MenuOpenCloseHandler::ReceiveEvent(MenuOpenCloseEvent* evn, void* di
 	return kEvent_Continue;
 }
 
-void LimitCPU() {
-	if (LimitCPUthreads) {
-		struct ChangeThreads_Code : Xbyak::CodeGenerator {
-			ChangeThreads_Code(void* buf) : Xbyak::CodeGenerator(4096, buf)
+void LimitCPUNewGame() {
+		struct ChangeThreadsNewGame_Code : Xbyak::CodeGenerator {
+			ChangeThreadsNewGame_Code(void* buf) : Xbyak::CodeGenerator(4096, buf)
 			{
 				Xbyak::Label retnLabel;
 
-				mov(ptr[rsp + 0x10], rbx);
+				lea(r8,ptr[rsp + 0x40]);
 
 				jmp(ptr[rip + retnLabel]);
 
 				L(retnLabel);
-				dq(RelocAddr<uintptr_t>(0x7FA780).GetUIntPtr() + 5);
+				dq(RelocAddr<uintptr_t>(0x12A23F5).GetUIntPtr() + 5);
 			}
 		};
 		void* codeBuf = g_localTrampoline.StartAlloc();
-		ChangeThreads_Code code(codeBuf);
+		ChangeThreadsNewGame_Code code(codeBuf);
 		g_localTrampoline.EndAlloc(code.getCurr());
 
-		ChangeThreads_Original = (_ChangeThreads)codeBuf;
+		ChangeThreadsNewGame_Original = (_ChangeThreadsNewGame)codeBuf;
 
-		g_branchTrampoline.Write5Branch(RelocAddr<uintptr_t>(0x7FA780).GetUIntPtr(), (uintptr_t)SetThreads);
+		g_branchTrampoline.Write5Branch(RelocAddr<uintptr_t>(0x12A23F5).GetUIntPtr(), (uintptr_t)SetThreadsNewGame);
+}
+
+void ReturnThreads() {
+		struct ReturnThreadsNewGame_Code : Xbyak::CodeGenerator {
+			ReturnThreadsNewGame_Code(void* buf) : Xbyak::CodeGenerator(4096, buf)
+			{
+				Xbyak::Label retnLabel;
+
+				lea(r8, ptr[rsp + 0x40]);
+
+				jmp(ptr[rip + retnLabel]);
+
+				L(retnLabel);
+				dq(RelocAddr<uintptr_t>(0xD1D4A0).GetUIntPtr() + 6);
+			}
+		};
+		void* codeBuf = g_localTrampoline.StartAlloc();
+		ReturnThreadsNewGame_Code code(codeBuf);
+		g_localTrampoline.EndAlloc(code.getCurr());
+
+		ReturnThreadsNewGame_Original = (_ReturnThreadsNewGame)codeBuf;
+
+		g_branchTrampoline.Write5Branch(RelocAddr<uintptr_t>(0xD1D4A0).GetUIntPtr(), (uintptr_t)ReturnThreadsNewGame);
+}
+
+void LimiterFunc() {
+	if (CurrentFPS > 0) {
+		while (PerfCounter::deltal(timing, ::_Query_perf_counter()) < CurrentFPS)
+		{
+			Sleep(0);
+		}
+	}
+	timing = _Query_perf_counter();
+}
+
+void RegisterHooks() {
+	g_branchTrampoline.Write5Call(FPSLimiter.GetUIntPtr(), (uintptr_t)LimiterFunc);
+	CurrentFPS = FPSui = static_cast<long long>(fpslimitgame * 1000000.0);
+	lockpickingFPSmax = static_cast<long long>(fpslockpicking * 1000000.0);
+	loadingFPSmax = static_cast<long long>(fpslimitload * 1000000.0);
+}
+
+void PatchGame() {
+	if (FixCPUThreads && !OnlyOnLoadingScreens) {
+		SafeWriteBuf(FixCPUThreadsAddress.GetUIntPtr(), "\x90\x90", 2);
+	}
+	if (OnlyOnLoadingScreens) {
+		SafeWriteBuf(FixCPUThreadsOnLoaddingAddress.GetUIntPtr(), "\x90\x90\x90\x90\x90", 5);
+	}
+	if (vsync) {
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x61E0950).GetUIntPtr(), &iPresentInterval1, sizeof(iPresentInterval1));
+	}
+	if (UntieSpeedFromFPS) {
+		unsigned char data1[] = { 0xBA, 0x00, 0x00, 0x00, 0x00 };
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x1B1393A).GetUIntPtr(), &data1, sizeof(data1));
+	}
+	if (ReduceAfterLoading) {
+		SafeWriteBuf(PostloadingMenuSpeedAddress.GetUIntPtr(), &PostloadingMenuSpeed, sizeof(float));
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x126D2DB).GetUIntPtr(), "\xF3\x0F\x10\x05\x08\x08\x00\x00\xF3\x0F\x59\x05\xE9\xE3\x8E\x04\xE9\x73\x04\x00\x00", 21);
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x126D75B).GetUIntPtr(), "\xE9\x7B\xFB\xFF\xFF\x90\x90\x90", 8);
+	}
+	if (FixRotationSpeed) {
+		//objects
+		SafeWriteBuf(RelocAddr<uintptr_t>(0xF49645).GetUIntPtr(), "\xF3\x0F\x59\x15\x83\x20\xC1\x04", 8);
+		float ForwardRotationSpeed = 2.941176470588235;
+		float ReverseRotationSpeed = -2.941176470588235;
+		SafeWriteBuf(RelocAddr<uintptr_t>(0xF49664).GetUIntPtr(), &ForwardRotationSpeed, sizeof(float));
+		SafeWriteBuf(RelocAddr<uintptr_t>(0xF49668).GetUIntPtr(), &ReverseRotationSpeed, sizeof(float));
+		SafeWriteBuf(RelocAddr<uintptr_t>(0xF49623).GetUIntPtr(), "\xF3\x0F\x10\x15\x39\x00\x00\x00", 8);
+		SafeWriteBuf(RelocAddr<uintptr_t>(0xF4962D).GetUIntPtr(), "\xF3\x0F\x10\x15\x33\x00\x00\x00", 8);
+	}
+	if (FixWorkshopRotationSpeed) {
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x2182B2).GetUIntPtr(), "\xF3\x0F\x59\x0D\x1A\x34\x94\x05", 8);
+	}
+	if (FixStuckAnimation) {
+		unsigned char s1[] = { 0x53 };
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x24EC8BF).GetUIntPtr(), &s1, sizeof(s1));
+		unsigned char s2[] = { 0xF3, 0x0F, 0x10, 0x05, 0x82, 0x9E, 0x72, 0x00 };
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x24EC8C0).GetUIntPtr(), &s2, sizeof(s2));
+		unsigned char s3[] = { 0xE8, 0xF3, 0x43, 0x00, 0x00 };
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x24EC8C8).GetUIntPtr(), &s3, sizeof(s3));
+		unsigned char s4[] = { 0x5B };
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x24EC8CD).GetUIntPtr(), &s4, sizeof(s4));
+		unsigned char s5[] = { 0xC3 };
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x24EC8CE).GetUIntPtr(), &s5, sizeof(s5));
+		unsigned char s6[] = { 0xE8, 0xE4, 0x02, 0x00, 0x00 };
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x24EC5D6).GetUIntPtr(), &s6, sizeof(s6));
+		unsigned char s7[] = { 0xF3, 0x0F, 0x11, 0x41, 0xF0 };
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x24F0CDC).GetUIntPtr(), &s7, sizeof(s7));
+		//fix moving objects
+		unsigned char data16[] = { 0x0F, 0x2E, 0x05, 0x5B, 0x98, 0x36, 0x02 };
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x14BEC1E).GetUIntPtr(), &data16, sizeof(data16));
+	}
+	if (FixStuttering) {
+		//cvttss2si rcx,xmm3 fix
+		//jmp
+		unsigned char data6[] = { 0xE9, 0x92, 0x9D, 0xFF, 0xFF };
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x1D6EB96).GetUIntPtr(), &data6, sizeof(data6));
+		//= 1
+		float value1 = 1;
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x1D6D470).GetUIntPtr(), &value1, sizeof(float));
+		//movss xmm3
+		unsigned char data7[] = { 0xF3, 0x0F, 0x10, 0x1D, 0x3B, 0x4B, 0x00, 0x00, 0xF3, 0x48, 0x0F, 0x2C, 0xCB, 0xE9, 0x5C, 0x62, 0x00, 0x00 };
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x1D6892D).GetUIntPtr(), &data7, sizeof(data7));
+		//C24 = 0
+		unsigned char data9[] = { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 };
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x1D6EDA1).GetUIntPtr(), &data9, sizeof(data9));
+		//C20 = FPS
+		unsigned char data10[] = { 0xF3, 0x0F, 0x11, 0x35, 0xCD, 0x40, 0x7D, 0x04 };
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x1D6EB4B).GetUIntPtr(), &data10, sizeof(data10));
+		//C1C = FPS
+		unsigned char data11[] = { 0xF3, 0x0F, 0x11, 0x35, 0x9F, 0x40, 0x7D, 0x04 };
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x1D6EB75).GetUIntPtr(), &data11, sizeof(data11));
+		//fix moving objects
+		unsigned char data14[] = { 0xF3, 0x0F, 0x10, 0x0D, 0xC8, 0x1A, 0x7C, 0x01, 0xE9, 0xD3, 0xFD, 0xFF, 0xFF };
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x14D58A0).GetUIntPtr(), &data14, sizeof(data14));
+		unsigned char data22[] = { 0xF3, 0x0F, 0x11, 0x15, 0xB6, 0x42, 0x7D, 0x04, 0x48, 0x83, 0xC4, 0x40, 0x5F, 0xC3 };
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x1D6EBF2).GetUIntPtr(), &data22, sizeof(data22));
+		//fix hair/clothes
+		if (!FixWindSpeed) {
+			unsigned char data18[] = { 0xF3, 0x44, 0x0F, 0x10, 0x0D, 0x59, 0x36, 0x7D, 0x04 };
+			SafeWriteBuf(RelocAddr<uintptr_t>(0x1D6F84E).GetUIntPtr(), &data18, sizeof(data18));
+			unsigned char data19[] = { 0xF3, 0x44, 0x0F, 0x10, 0x0D, 0xB0, 0x35, 0x7D, 0x04 };
+			SafeWriteBuf(RelocAddr<uintptr_t>(0x1D6F8F7).GetUIntPtr(), &data19, sizeof(data19));
+			unsigned char data21[] = { 0xF3, 0x0F, 0x10, 0x05, 0xCD, 0x33, 0x7D, 0x04 };
+			SafeWriteBuf(RelocAddr<uintptr_t>(0x1D6FADB).GetUIntPtr(), &data21, sizeof(data21));
+		}
+	}
+	if (FixWhiteScreen) {
+		unsigned char data23[] = { 0x90, 0x90 };
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x172A893).GetUIntPtr(), &data23, sizeof(data23));
+	}
+	if (FixWindSpeed) {
+		unsigned char data17[] = { 0x0F, 0x29, 0x74, 0x24, 0x30, 0xF3, 0x0F, 0x10, 0x35, 0x97, 0x7A, 0xEC, 0x00, 0xE9, 0x2B, 0xFE, 0xFF, 0xFF };
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x1DCF8CC).GetUIntPtr(), &data17, sizeof(data17));
+		unsigned char data8[] = { 0xE9, 0xC6, 0x01, 0x00, 0x00 };
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x1DCF701).GetUIntPtr(), &data8, sizeof(data8));
+	}
+	if (FixRotationSpeed) {
+		//fix mouse rotation speed
+		unsigned char data12[] = { 0xF3, 0x0F, 0x59, 0x0D, 0x10, 0x9D, 0x97, 0x01 };
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x129CA32).GetUIntPtr(), &data12, sizeof(data12));
+		unsigned char fPickMouseRotationSpeed[] = { 0x96, 0x43, 0x8B, 0x3C, 0x00 }; //0.017
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x2C1674A).GetUIntPtr(), fPickMouseRotationSpeed, sizeof(fPickMouseRotationSpeed));
+	}
+	//Disable animation on loading screens
+	if (DisableAnimationOnLoadingScreens) {
+		unsigned char data20[] = { 0x90, 0x90, 0x90, 0x90 };
+		SafeWriteBuf(RelocAddr<uintptr_t>(0xCBFFCD).GetUIntPtr(), &data20, sizeof(data20));
+	}
+	if (DisableBlackLoadingScreens) {
+		unsigned char data15[] = { 0xEB, 0x1E };
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x1297076).GetUIntPtr(), &data15, sizeof(data15));
+	}
+	if (FixLoadingModel) {
+		//fix rotation on loading screen
+		unsigned char data24[] = { 0x8B, 0x8B, 0x6C, 0x02, 0x00, 0x00, 0xF3, 0x44, 0x0F, 0x10, 0x05, 0x25, 0xFC, 0x9F, 0x01, 0xE9, 0x2A, 0xFD, 0xFF, 0xFF };
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x129773C).GetUIntPtr(), &data24, sizeof(data24));
+		unsigned char data25[] = { 0xE9, 0xC3, 0x02, 0x00, 0x00, 0x90 };
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x1297474).GetUIntPtr(), &data25, sizeof(data25));
+		unsigned char data13[] = { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 };
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x1298EA3).GetUIntPtr(), &data13, sizeof(data13));
 	}
 }
 
@@ -708,66 +763,27 @@ void onF4SEMessage(F4SEMessagingInterface::Message* msg) {
 		static auto pMenuOpenCloseHandler = new MenuOpenCloseHandler();
 		(*g_ui)->menuOpenCloseEventSource.AddEventSink(pMenuOpenCloseHandler);
 		if (firstload) {
-			firstload = false;
-			if (FixRotationSpeed) {
-				//fix rotation speed
-				unsigned char data2[] = { 0xF3, 0x0F, 0x59, 0x15, 0x14, 0xD1, 0xCC, 0x01 };
-				SafeWriteBuf(RelocAddr<uintptr_t>(0xF49645).GetUIntPtr(), &data2, sizeof(data2));
-				unsigned char data4[] = { 0xF3, 0x0F, 0x10, 0x05, 0xDC, 0x00, 0x00, 0x00 };
-				SafeWriteBuf(RelocAddr<uintptr_t>(0x12446C8).GetUIntPtr(), &data4, sizeof(data4));
-				unsigned char data5[] = { 0xF3, 0x0F, 0x10, 0x0D, 0x69, 0x01, 0x00, 0x00 };
-				SafeWriteBuf(RelocAddr<uintptr_t>(0x12446DF).GetUIntPtr(), &data5, sizeof(data5));
-				//fix mouse rotation speed
-				unsigned char data12[] = { 0xF3, 0x0F, 0x59, 0x0D, 0x10, 0x9D, 0x97, 0x01 };
-				SafeWriteBuf(RelocAddr<uintptr_t>(0x129CA32).GetUIntPtr(), &data12, sizeof(data12));
-				unsigned char fPickMouseRotationSpeed[] = { 0x96, 0x43, 0x8B, 0x3C, 0x00 }; //0.017
-				SafeWriteBuf(RelocAddr<uintptr_t>(0x2C1674A).GetUIntPtr(), fPickMouseRotationSpeed, sizeof(fPickMouseRotationSpeed));
-				//fix rotation on loading screen
-				unsigned char data13[] = { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 };
-				SafeWriteBuf(RelocAddr<uintptr_t>(0x1298EA3).GetUIntPtr(), &data13, sizeof(data13));
-			}
-			if (FixWorkshopRotationSpeed) {
-				unsigned char data3[] = { 0xF3, 0x0F, 0x59, 0x0D, 0xD7, 0xE4, 0x9F, 0x02 };
-				SafeWriteBuf(RelocAddr<uintptr_t>(0x2182B2).GetUIntPtr(), &data3, sizeof(data3));
-			}
-			//fix loading rotation
-			if (FixStuckAnimation) {
-				unsigned char s1[] = { 0x53 };
-				SafeWriteBuf(RelocAddr<uintptr_t>(0x24EC8BF).GetUIntPtr(), &s1, sizeof(s1));
-				unsigned char s2[] = { 0xF3, 0x0F, 0x10, 0x05, 0x82, 0x9E, 0x72, 0x00 };
-				SafeWriteBuf(RelocAddr<uintptr_t>(0x24EC8C0).GetUIntPtr(), &s2, sizeof(s2));
-				unsigned char s3[] = { 0xE8, 0xF3, 0x43, 0x00, 0x00 };
-				SafeWriteBuf(RelocAddr<uintptr_t>(0x24EC8C8).GetUIntPtr(), &s3, sizeof(s3));
-				unsigned char s4[] = { 0x5B };
-				SafeWriteBuf(RelocAddr<uintptr_t>(0x24EC8CD).GetUIntPtr(), &s4, sizeof(s4));
-				unsigned char s5[] = { 0xC3 };
-				SafeWriteBuf(RelocAddr<uintptr_t>(0x24EC8CE).GetUIntPtr(), &s5, sizeof(s5));
-				unsigned char s6[] = { 0xE8, 0xE4, 0x02, 0x00, 0x00 };
-				SafeWriteBuf(RelocAddr<uintptr_t>(0x24EC5D6).GetUIntPtr(), &s6, sizeof(s6));
-				unsigned char s7[] = { 0xF3, 0x0F, 0x11, 0x41, 0xF0 };
-				SafeWriteBuf(RelocAddr<uintptr_t>(0x24F0CDC).GetUIntPtr(), &s7, sizeof(s7));
-				//fix moving objects
-				unsigned char data16[] = { 0x0F, 0x2E, 0x05, 0x5B, 0x98, 0x36, 0x02 };
-				SafeWriteBuf(RelocAddr<uintptr_t>(0x14BEC1E).GetUIntPtr(), &data16, sizeof(data16));
-			}
-			if (JumpFix) {
-				//fix jumping
-				unsigned char data17[] = { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 };
-				SafeWriteBuf(RelocAddr<uintptr_t>(0x1E15375).GetUIntPtr(), &data17, sizeof(data17));
-			}
+			getinisettings();
+			PatchGame();
+			_MESSAGE("\nPatching is complete!");
 			if (vsync) {
 				SafeWriteBuf(RelocAddr<uintptr_t>(0x61E0950).GetUIntPtr(), &iPresentInterval1, sizeof(iPresentInterval1));
 			}
-			// Set the max processor mask
-			if (!fpslimit) {
+			HookFPS();
+			if (LimitCPUThreadsNG) {
+				_MESSAGE("Getting the number of processor threads...");
 				GetProcId();
-				HookFPS();
+				_MESSAGE("Threads limitation...");
+				LimitCPUNewGame();
+				ReturnThreads();
 			}
-			else {
-				if (!CreateDeviceAndSwapChain()) {
-					HookFPS();
-				}
+			if (limitload || limitgame || FixLockpickingSound) {
+				_MESSAGE("FPS limitation...");
+				timing = _Query_perf_counter();
+				RegisterHooks();;
 			}
+			_MESSAGE("\nPlugin load completed!\n");
+			firstload = false;
 		}
 		break;
 	}
@@ -790,6 +806,22 @@ extern "C"
 
 		g_pluginHandle = f4se->GetPluginHandle();
 
+		if (f4se->runtimeVersion != SUPPORTED_RUNTIME_VERSION) {
+			char str[512];
+			sprintf_s(str, sizeof(str), "Your game version: v%d.%d.%d.%d\nExpected version: v%d.%d.%d.%d\n%s will be disabled.",
+				GET_EXE_VERSION_MAJOR(f4se->runtimeVersion),
+				GET_EXE_VERSION_MINOR(f4se->runtimeVersion),
+				GET_EXE_VERSION_BUILD(f4se->runtimeVersion),
+				GET_EXE_VERSION_SUB(f4se->runtimeVersion),
+				GET_EXE_VERSION_MAJOR(SUPPORTED_RUNTIME_VERSION),
+				GET_EXE_VERSION_MINOR(SUPPORTED_RUNTIME_VERSION),
+				GET_EXE_VERSION_BUILD(SUPPORTED_RUNTIME_VERSION),
+				GET_EXE_VERSION_SUB(SUPPORTED_RUNTIME_VERSION),
+				PLUGIN_NAME_LONG
+			);
+			MessageBox(NULL, str, PLUGIN_NAME_LONG, MB_OK | MB_ICONEXCLAMATION);
+			return false;
+		}
 		if (f4se->runtimeVersion > SUPPORTED_RUNTIME_VERSION) {
 			_MESSAGE("INFO: Newer game version (%08X) than target (%08X).", f4se->runtimeVersion, SUPPORTED_RUNTIME_VERSION);
 		}
@@ -805,17 +837,6 @@ extern "C"
 	}
 	bool F4SEPlugin_Load(const F4SEInterface* f4se) {
 		//Get Ini Settings
-		getinisettings();
-		//Game speed fix
-		if (UntieSpeedFromFPS) {
-			unsigned char data1[] = { 0xBA, 0x00, 0x00, 0x00, 0x00 };
-			SafeWriteBuf(RelocAddr<uintptr_t>(0x1B1393A).GetUIntPtr(), &data1, sizeof(data1));
-		}
-		//Disable animation on loading screens
-		if (DisableAnimationOnLoadingScreens) {
-			unsigned char data20[] = { 0x90, 0x90, 0x90, 0x90 };
-			SafeWriteBuf(RelocAddr<uintptr_t>(0xCBFFCD).GetUIntPtr(), &data20, sizeof(data20));
-		}
 		if (!g_branchTrampoline.Create(1024 * 64))
 		{
 			_ERROR("couldn't create branch trampoline. this is fatal. skipping remainder of init process.");
@@ -826,11 +847,6 @@ extern "C"
 		{
 			_ERROR("couldn't create codegen buffer. this is fatal. skipping remainder of init process.");
 			return false;
-		}
-		LimitCPU();
-		if (DisableBlackLoadingScreens) {
-			unsigned char data15[] = { 0xEB, 0x1E };
-			SafeWriteBuf(RelocAddr<uintptr_t>(0x1297076).GetUIntPtr(), &data15, sizeof(data15));
 		}
 		g_messaging->RegisterListener(g_pluginHandle, "F4SE", onF4SEMessage);
 		return true;
