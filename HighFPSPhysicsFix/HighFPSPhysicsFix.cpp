@@ -764,6 +764,8 @@ void onF4SEMessage(F4SEMessagingInterface::Message* msg) {
 		(*g_ui)->menuOpenCloseEventSource.AddEventSink(pMenuOpenCloseHandler);
 		if (firstload) {
 			getinisettings();
+			_MESSAGE("Getting the number of processor threads...");
+			GetProcId();
 			PatchGame();
 			_MESSAGE("\nPatching is complete!");
 			if (vsync) {
@@ -771,8 +773,6 @@ void onF4SEMessage(F4SEMessagingInterface::Message* msg) {
 			}
 			HookFPS();
 			if (LimitCPUThreadsNG) {
-				_MESSAGE("Getting the number of processor threads...");
-				GetProcId();
 				_MESSAGE("Threads limitation...");
 				LimitCPUNewGame();
 				ReturnThreads();
@@ -836,7 +836,6 @@ extern "C"
 		return true;
 	}
 	bool F4SEPlugin_Load(const F4SEInterface* f4se) {
-		//Get Ini Settings
 		if (!g_branchTrampoline.Create(1024 * 64))
 		{
 			_ERROR("couldn't create branch trampoline. this is fatal. skipping remainder of init process.");
