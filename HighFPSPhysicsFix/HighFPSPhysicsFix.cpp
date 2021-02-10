@@ -1,6 +1,7 @@
 ﻿#include "f4se/Hooks_Scaleform.cpp"
 #include "f4se_common/SafeWrite.h"
 #include "f4se_common/BranchTrampoline.h"
+#include "f4se/GameSettings.h"
 #include "xbyak/xbyak.h"
 #include <config.h>
 #include <shlobj.h>
@@ -40,7 +41,6 @@ unsigned int nMaxProcessorMaskNG;
 unsigned int nMaxProcessorAfterLoad;
 bool FixLockpickingSound, accelerateLoading, vsync, UntieSpeedFromFPS, DisableiFPSClamp, FixStuttering, FixWorkshopRotationSpeed, FixRotationSpeed, FixStuckAnimation, limitload, limitgame, LimitCPUThreadsNG, DisableAnimationOnLoadingScreens, DisableBlackLoadingScreens, FixWindSpeed, FixWhiteScreen, FixLoadingModel, ReduceAfterLoading, FixCPUThreads, OnlyOnLoadingScreens, WriteLoadingTime;
 float fpslimitgame, fpslimitload, fpslockpicking, SittingRotSpeedX, SittingRotSpeedY, PostloadingMenuSpeed;
-__int64	TimeAddress, fFirstPersonSittingRotationSpeedX, fFirstPersonSittingRotationSpeedY;
 PerfCounter PerfCounter::m_Instance;
 long long PerfCounter::perf_freq;
 float PerfCounter::perf_freqf;
@@ -55,7 +55,6 @@ RelocAddr<uintptr_t> FPSLimiter(0x1D0B67E);
 
 HANDLE f4handle = NULL;
 double maxft, minft;
-bool GetProcess(HWND hWnd);
 
 
 int iPresentInterval0 = 0;
@@ -400,75 +399,12 @@ void getinisettings() {
 	_MESSAGE(os.str().c_str());
 }
 
-static BOOL CALLBACK enumWindowCallback(HWND hWnd, LPARAM lparam) {
-	int length = GetWindowTextLength(hWnd);
-	char* buffer = new char[length + 1];
-	GetWindowText(hWnd, buffer, length + 1);
-	if (!strcmp(buffer, "Fallout4")) {
-		GetProcess(hWnd);
-	}
-	return TRUE;
-}
-
-DWORD_PTR GetProcessBaseAddress(DWORD processID)
-{
-	DWORD_PTR   baseAddress = 0;
-	HANDLE      processHandle = OpenProcess(PROCESS_ALL_ACCESS, FALSE, processID);
-	HMODULE* moduleArray;
-	LPBYTE      moduleArrayBytes;
-	DWORD       bytesRequired;
-
-	if (processHandle)
-	{
-		if (EnumProcessModules(processHandle, NULL, 0, &bytesRequired))
-		{
-			if (bytesRequired)
-			{
-				moduleArrayBytes = (LPBYTE)LocalAlloc(LPTR, bytesRequired);
-
-				if (moduleArrayBytes)
-				{
-					unsigned int moduleCount;
-
-					moduleCount = bytesRequired / sizeof(HMODULE);
-					moduleArray = (HMODULE*)moduleArrayBytes;
-
-					if (EnumProcessModules(processHandle, moduleArray, bytesRequired, &bytesRequired))
-					{
-						baseAddress = (DWORD_PTR)moduleArray[0];
-					}
-
-					LocalFree(moduleArrayBytes);
-				}
-			}
-		}
-
-		CloseHandle(processHandle);
-	}
-
-	return baseAddress;
-}
-
-bool GetProcess(HWND hWnd) {
-	DWORD pid;
-	GetWindowThreadProcessId(hWnd, &pid);
-	if (!pid) return false;
-	DWORD_PTR baseadd = GetProcessBaseAddress(pid);
-	if (!baseadd) return false;
-	f4handle = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
-	if (!f4handle) return false;
-	TimeAddress = baseadd + 0x5B5B6D0;
-	fFirstPersonSittingRotationSpeedX = baseadd + 0x3804738;
-	fFirstPersonSittingRotationSpeedY = baseadd + 0x3804750;
-	return true;
-}
-
-void GetProcId() {
-	EnumWindows(enumWindowCallback, NULL);
+void GetNumberOfThreads() {
 	nMaxProcessorMaskNG = (1 << NumOfThreadsWhileLoadingNewGame) - 1;
 	SYSTEM_INFO SystemInfo;
 	GetSystemInfo(&SystemInfo);
 	nMaxProcessorAfterLoad = (1 << SystemInfo.dwNumberOfProcessors) - 1;
+	f4handle = GetCurrentProcess();
 }
 
 void SetThreadsNewGame(void* unk1, void* unk2, void* unk3, void* unk4) {
@@ -490,11 +426,9 @@ void HookFPS() {
 		SafeWriteBuf(RelocAddr<uintptr_t>(0x5B5B6C8).GetUIntPtr(), &clamp, sizeof(float));
 	}
 	if (FixRotationSpeed) { 
-		//fix sitting X
-		ReadProcessMemory(f4handle, (PVOID*)fFirstPersonSittingRotationSpeedX, &SittingRotSpeedX, sizeof(float), 0);
-		ReadProcessMemory(f4handle, (PVOID*)fFirstPersonSittingRotationSpeedY, &SittingRotSpeedY, sizeof(float), 0);
-		SittingRotSpeedX = SittingRotSpeedX / 0.017;
-		SittingRotSpeedY = SittingRotSpeedY / 0.017;
+		//fix sitting rotation
+		SittingRotSpeedX = GetINISetting("fFirstPersonSittingRotationSpeedX:Camera")->data.f32 / 0.017;
+		SittingRotSpeedY = GetINISetting("fFirstPersonSittingRotationSpeedY:Camera")->data.f32 / 0.017;
 		SafeWriteBuf(SittingRotationSpeedXAddress.GetUIntPtr(), &SittingRotSpeedX, sizeof(float));
 		SafeWriteBuf(SittingRotationSpeedYAddress.GetUIntPtr(), &SittingRotSpeedY, sizeof(float));
 		SafeWriteBuf(RelocAddr<uintptr_t>(0x12447AC).GetUIntPtr(), "\xF3\x0F\x59\x05\x20\x6F\x91\x04\xF3\x0F\x59\x40\x4C\xE9\x17\xFF\xFF\xFF", 18); //x
@@ -764,8 +698,6 @@ void onF4SEMessage(F4SEMessagingInterface::Message* msg) {
 		(*g_ui)->menuOpenCloseEventSource.AddEventSink(pMenuOpenCloseHandler);
 		if (firstload) {
 			getinisettings();
-			_MESSAGE("Getting the number of processor threads...");
-			GetProcId();
 			PatchGame();
 			_MESSAGE("\nPatching is complete!");
 			if (vsync) {
@@ -773,6 +705,8 @@ void onF4SEMessage(F4SEMessagingInterface::Message* msg) {
 			}
 			HookFPS();
 			if (LimitCPUThreadsNG) {
+				_MESSAGE("Getting the number of processor threads...");
+				GetNumberOfThreads();
 				_MESSAGE("Threads limitation...");
 				LimitCPUNewGame();
 				ReturnThreads();
