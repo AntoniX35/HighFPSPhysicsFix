@@ -27,8 +27,8 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="config.h" />
-    <ClInclude Include="PerfCounter.cpp" />
-    <ClInclude Include="PerfCounter.h" />
+    <ClInclude Include="data.h" />
+    <ClInclude Include="HighFPSPhysicsFix.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="exports.def" />
