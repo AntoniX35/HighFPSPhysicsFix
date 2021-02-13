@@ -34,12 +34,13 @@ float GetPrivateProfileFloat(LPCSTR lpAppName, LPCSTR lpKeyName, FLOAT flDefault
 //Ini File
 #define INI_FILE "data\\F4SE\\Plugins\\HighFPSPhysicsFix.ini"
 
+float f = 0.017;
 bool firstload = true;
 int isLockpicking, isLoading, NumOfThreadsWhileLoading, NumOfThreadsWhileLoadingNewGame, fpslimit, isLimiting;
 unsigned int nMaxProcessorMask;
 unsigned int nMaxProcessorMaskNG;
 unsigned int nMaxProcessorAfterLoad;
-bool FixLockpickingSound, accelerateLoading, vsync, UntieSpeedFromFPS, DisableiFPSClamp, FixStuttering, FixWorkshopRotationSpeed, FixRotationSpeed, FixStuckAnimation, limitload, limitgame, LimitCPUThreadsNG, DisableAnimationOnLoadingScreens, DisableBlackLoadingScreens, FixWindSpeed, FixWhiteScreen, FixLoadingModel, ReduceAfterLoading, FixCPUThreads, OnlyOnLoadingScreens, WriteLoadingTime;
+bool FixLockpickingSound, accelerateLoading, vsync, UntieSpeedFromFPS, DisableiFPSClamp, FixStuttering, FixWorkshopRotationSpeed, FixRotationSpeed, FixSittingRotationSpeed, FixStuckAnimation, limitload, limitgame, LimitCPUThreadsNG, DisableAnimationOnLoadingScreens, DisableBlackLoadingScreens, FixWindSpeed, FixWhiteScreen, FixLoadingModel, ReduceAfterLoading, FixCPUThreads, OnlyOnLoadingScreens, WriteLoadingTime;
 float fpslimitgame, fpslimitload, fpslockpicking, SittingRotSpeedX, SittingRotSpeedY, PostloadingMenuSpeed;
 PerfCounter PerfCounter::m_Instance;
 long long PerfCounter::perf_freq;
@@ -355,6 +356,20 @@ void getinisettings() {
 		os << "disabled";
 	}
 
+	os << "\nFix sitting rotation speed: ";
+
+	//Fix rotation speed
+	GetPrivateProfileString("Fixes", "FixSittingRotationSpeed", "true", buf, sizeof(buf), INI_FILE);
+	value = ToLowerStr(buf);
+	if (value == "true") {
+		FixSittingRotationSpeed = true;
+		os << "enabled";
+	}
+	else {
+		FixSittingRotationSpeed = false;
+		os << "disabled";
+	}
+
 	os << "\nFix workshop rotation speed: ";
 
 	//Fix workshop rotation speed
@@ -425,16 +440,18 @@ void HookFPS() {
 		float clamp = 0;
 		SafeWriteBuf(RelocAddr<uintptr_t>(0x5B5B6C8).GetUIntPtr(), &clamp, sizeof(float));
 	}
-	if (FixRotationSpeed) { 
+	if (FixSittingRotationSpeed) { 
 		//fix sitting rotation
-		SittingRotSpeedX = GetINISetting("fFirstPersonSittingRotationSpeedX:Camera")->data.f32 / 0.017;
-		SittingRotSpeedY = GetINISetting("fFirstPersonSittingRotationSpeedY:Camera")->data.f32 / 0.017;
+		SittingRotSpeedX = GetINISetting("fFirstPersonSittingRotationSpeedX:Camera")->data.f32 / f;
+		SittingRotSpeedY = GetINISetting("fFirstPersonSittingRotationSpeedY:Camera")->data.f32 / f;
 		SafeWriteBuf(SittingRotationSpeedXAddress.GetUIntPtr(), &SittingRotSpeedX, sizeof(float));
 		SafeWriteBuf(SittingRotationSpeedYAddress.GetUIntPtr(), &SittingRotSpeedY, sizeof(float));
-		SafeWriteBuf(RelocAddr<uintptr_t>(0x12447AC).GetUIntPtr(), "\xF3\x0F\x59\x05\x20\x6F\x91\x04\xF3\x0F\x59\x40\x4C\xE9\x17\xFF\xFF\xFF", 18); //x
-		SafeWriteBuf(RelocAddr<uintptr_t>(0x12446D0).GetUIntPtr(), "\xE9\xD7\x00\x00\x00", 5);
-		SafeWriteBuf(RelocAddr<uintptr_t>(0x124484E).GetUIntPtr(), "\xF3\x0F\x59\x0D\x7E\x6E\x91\x04\xF3\x0F\x10\x43\x64\xE9\x8C\xFE\xFF\xFF", 18); //y
-		SafeWriteBuf(RelocAddr<uintptr_t>(0x12446E7).GetUIntPtr(), "\xE9\x62\x01\x00\x00", 5);
+		//x
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x124603D).GetUIntPtr(), "\xF3\x0F\x59\x05\x8F\x56\x91\x04\xF3\x0F\x59\x40\x4C\xE9\x86\xE6\xFF\xFF", 18);
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x12446D0).GetUIntPtr(), "\xE9\x68\x19\x00\x00", 5);
+		//y
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x124764C).GetUIntPtr(), "\xF3\x0F\x59\x0D\x80\x40\x91\x04\xF3\x0F\x10\x43\x64\xE9\x8E\xD0\xFF\xFF", 18);
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x12446E7).GetUIntPtr(), "\xE9\x60\x2F\x00\x00", 5);
 	}
 }
 
@@ -714,7 +731,7 @@ void onF4SEMessage(F4SEMessagingInterface::Message* msg) {
 			if (limitload || limitgame || FixLockpickingSound) {
 				_MESSAGE("FPS limitation...");
 				timing = _Query_perf_counter();
-				RegisterHooks();;
+				RegisterHooks();
 			}
 			_MESSAGE("\nPlugin load completed!\n");
 			firstload = false;
