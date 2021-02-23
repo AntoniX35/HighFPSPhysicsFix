@@ -20,6 +20,8 @@
 #include <TlHelp32.h>
 #include "PerfCounter.h"
 
+#include <d3d11.h>
+
 #pragma comment(lib, "psapi.lib")
 
 float GetPrivateProfileFloat(LPCSTR lpAppName, LPCSTR lpKeyName, FLOAT flDefault, LPCSTR lpFileName)
@@ -40,16 +42,18 @@ int isLockpicking, isLoading, NumOfThreadsWhileLoading, NumOfThreadsWhileLoading
 unsigned int nMaxProcessorMask;
 unsigned int nMaxProcessorMaskNG;
 unsigned int nMaxProcessorAfterLoad;
-bool FixLockpickingSound, accelerateLoading, vsync, UntieSpeedFromFPS, DisableiFPSClamp, FixStuttering, FixWorkshopRotationSpeed, FixRotationSpeed, FixSittingRotationSpeed, FixStuckAnimation, limitload, limitgame, LimitCPUThreadsNG, DisableAnimationOnLoadingScreens, DisableBlackLoadingScreens, FixWindSpeed, FixWhiteScreen, FixLoadingModel, ReduceAfterLoading, FixCPUThreads, OnlyOnLoadingScreens, WriteLoadingTime;
+bool FixLockpickingSound, accelerateLoading, vsync, UntieSpeedFromFPS, DisableiFPSClamp, FixStuttering, FixWorkshopRotationSpeed, FixRotationSpeed, FixSittingRotationSpeed, FixStuckAnimation, limitload, limitgame, LimitCPUThreadsNG, DisableAnimationOnLoadingScreens, DisableBlackLoadingScreens, FixWindSpeed, FixWhiteScreen, FixLoadingModel, ReduceAfterLoading, FixCPUThreads, OnlyOnLoadingScreens, WriteLoadingTime, ForceSwapEffect;
 float fpslimitgame, fpslimitload, fpslockpicking, SittingRotSpeedX, SittingRotSpeedY, PostloadingMenuSpeed;
 PerfCounter PerfCounter::m_Instance;
 long long PerfCounter::perf_freq;
 float PerfCounter::perf_freqf;
+DXGI_SWAP_EFFECT SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
 RelocAddr<uintptr_t> PostloadingMenuSpeedAddress(0x126DAEB);
 RelocAddr<uintptr_t> SittingRotationSpeedXAddress(0x3804738);
 RelocAddr<uintptr_t> SittingRotationSpeedYAddress(0x3804750);
 RelocAddr<uintptr_t> FixCPUThreadsAddress(0x1B10D59);
 RelocAddr<uintptr_t> FixCPUThreadsOnLoaddingAddress(0x18C62F);
+RelocAddr<uintptr_t> D3D11CreateDeviceAndSwapChainAddress(0x1D17879);
 
 long long CurrentFPS, FPSui, loadingFPSmax, lockpickingFPSmax, timing;
 RelocAddr<uintptr_t> FPSLimiter(0x1D0B67E);
@@ -72,6 +76,16 @@ typedef void(*_ChangeThreadsNewGame)(void* unk1, void* unk2, void* unk3, void* u
 _ChangeThreadsNewGame ChangeThreadsNewGame_Original = nullptr;
 typedef void(*_ReturnThreadsNewGame)(void* unk1, void* unk2, void* unk3, void* unk4);
 _ReturnThreadsNewGame ReturnThreadsNewGame_Original = nullptr;
+
+PFN_D3D11_CREATE_DEVICE_AND_SWAP_CHAIN D3D11CreateDeviceAndSwapChain_Original = nullptr;
+
+#pragma pack(push, 1)
+struct CB5Code
+{
+	uint8_t	op;
+	int32_t	displ;
+};
+#pragma pack(pop)
 
 class MenuOpenCloseHandler : public BSTEventSink<MenuOpenCloseEvent>
 	{
@@ -411,6 +425,60 @@ void getinisettings() {
 		FixStuckAnimation = false;
 		os << "disabled";
 	}
+
+	_MESSAGE(os.str().c_str());
+}
+
+void getinisettings_early()
+{
+	char buf[256];
+	std::string value;
+	std::ostringstream os;
+
+	os << "\nForce swap effect: ";
+
+	//Force swap effect
+	GetPrivateProfileString("Main", "ForceSwapEffect", "false", buf, sizeof(buf), INI_FILE);
+	value = ToLowerStr(buf);
+	if (value == "true")
+	{
+		ForceSwapEffect = true;
+		os << "enabled";
+	}
+	else
+	{
+		ForceSwapEffect = false;
+		os << "disabled";
+	}
+
+	//Select the swap effect
+	if (ForceSwapEffect == true)
+	{
+		os << "\nSwap effect: ";
+		GetPrivateProfileString("Main", "SwapEffect", "flip_discard", buf, sizeof(buf), INI_FILE);
+		value = ToLowerStr(buf);
+		if (value == "discard")
+		{
+			SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+			os << "discard";
+		}
+		else if (value == "sequential")
+		{
+			SwapEffect = DXGI_SWAP_EFFECT_SEQUENTIAL;
+			os << "sequential";
+		}
+		else if (value == "flip_sequential")
+		{
+			SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+			os << "flip_sequential";
+		}
+		else if (value == "flip_discard")
+		{
+			SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+			os << "flip_discard";
+		}
+	}
+
 	_MESSAGE(os.str().c_str());
 }
 
@@ -740,6 +808,34 @@ void onF4SEMessage(F4SEMessagingInterface::Message* msg) {
 	}
 }
 
+void SetSwapEffect(DXGI_SWAP_CHAIN_DESC* pSwapChainDesc)
+{
+	if (pSwapChainDesc->Windowed == TRUE)
+	{
+		_MESSAGE("\nSetting swap effect...");
+		pSwapChainDesc->SwapEffect = SwapEffect;
+	}
+}
+
+HRESULT WINAPI D3D11CreateDeviceAndSwapChain_Hook(
+	_In_opt_ IDXGIAdapter* pAdapter,
+	D3D_DRIVER_TYPE DriverType,
+	HMODULE Software,
+	UINT Flags,
+	_In_reads_opt_(FeatureLevels) CONST D3D_FEATURE_LEVEL* pFeatureLevels,
+	UINT FeatureLevels,
+	UINT SDKVersion,
+	_In_opt_ CONST DXGI_SWAP_CHAIN_DESC* pSwapChainDesc,
+	_COM_Outptr_opt_ IDXGISwapChain** ppSwapChain,
+	_COM_Outptr_opt_ ID3D11Device** ppDevice,
+	_Out_opt_ D3D_FEATURE_LEVEL* pFeatureLevel,
+	_COM_Outptr_opt_ ID3D11DeviceContext** ppImmediateContext)
+{
+	SetSwapEffect(const_cast<DXGI_SWAP_CHAIN_DESC*>(pSwapChainDesc));
+	_MESSAGE("Calling original D3D11CreateDeviceAndSwapChain!");
+	return D3D11CreateDeviceAndSwapChain_Original(pAdapter, DriverType, Software, Flags, pFeatureLevels, FeatureLevels, SDKVersion, pSwapChainDesc, ppSwapChain, ppDevice, pFeatureLevel, ppImmediateContext);
+}
+
 extern "C"
 {
 	bool F4SEPlugin_Query(const F4SEInterface* f4se, PluginInfo* info)
@@ -798,6 +894,18 @@ extern "C"
 			_ERROR("couldn't create codegen buffer. this is fatal. skipping remainder of init process.");
 			return false;
 		}
+
+		// Needs to be earlier than onF4SEMessage
+		getinisettings_early();
+		if (ForceSwapEffect)
+		{
+			// Hooking method from https://github.com/SlavicPotato/sse-build-resources/blob/master/ext/IHook.h
+			auto ins = reinterpret_cast<CB5Code*>(D3D11CreateDeviceAndSwapChainAddress.GetUIntPtr());
+			uintptr_t o = D3D11CreateDeviceAndSwapChainAddress + sizeof(CB5Code) + ins->displ;
+			D3D11CreateDeviceAndSwapChain_Original = reinterpret_cast<PFN_D3D11_CREATE_DEVICE_AND_SWAP_CHAIN>(o);
+			g_branchTrampoline.Write5Call(D3D11CreateDeviceAndSwapChainAddress, reinterpret_cast<uintptr_t>(D3D11CreateDeviceAndSwapChain_Hook));
+		}
+
 		g_messaging->RegisterListener(g_pluginHandle, "F4SE", onF4SEMessage);
 		return true;
 	}
