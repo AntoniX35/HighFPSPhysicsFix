@@ -1,12 +1,16 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
+    <ClCompile Include="D3D11hook.cpp" />
     <ClCompile Include="HighFPSPhysicsFix.cpp" />
+    <ClCompile Include="JITASM.cpp" />
+    <ClCompile Include="stdafx.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="config.h" />
-    <ClInclude Include="data.h" />
+    <ClInclude Include="D3D11hook.h" />
     <ClInclude Include="HighFPSPhysicsFix.h" />
+    <ClInclude Include="stdafx.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="exports.def" />

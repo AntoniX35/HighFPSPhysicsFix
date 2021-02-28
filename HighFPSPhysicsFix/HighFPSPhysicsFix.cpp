@@ -1,28 +1,41 @@
-﻿#include "f4se/Hooks_Scaleform.cpp"
-#include "f4se_common/SafeWrite.h"
-#include "f4se_common/BranchTrampoline.h"
-#include "f4se/GameSettings.h"
-#include "xbyak/xbyak.h"
-#include <config.h>
-#include <shlobj.h>
-#include <stdio.h>
-#include <string>
-#include <Windows.h>
-#include <sstream> 
-#include <time.h>
-#include "common/IDebugLog.h"
-#include <chrono>
-#include <algorithm>
-#include <ratio>
-#include <ctime>
-#include <psapi.h>
-#include <mutex>
-#include <TlHelp32.h>
-#include "PerfCounter.h"
+﻿#include "stdafx.h"
+//Ini File
+#define INI_FILE "data\\F4SE\\Plugins\\HighFPSPhysicsFix.ini"
 
-#include <d3d11.h>
+float f = 0.017;
+PerfCounter PerfCounter::m_Instance;
+long long PerfCounter::perf_freq;
+float PerfCounter::perf_freqf;
 
-#pragma comment(lib, "psapi.lib")
+RelocAddr<uintptr_t> PostloadingMenuSpeedAddress(0x126DAEB);
+RelocAddr<uintptr_t> SittingRotationSpeedXAddress(0x3804738);
+RelocAddr<uintptr_t> SittingRotationSpeedYAddress(0x3804750);
+RelocAddr<uintptr_t> FixCPUThreadsAddress(0x1B10D59);
+RelocAddr<uintptr_t> FixCPUThreadsOnLoaddingAddress(0x18C62F);
+RelocAddr<uintptr_t> BethesdaVsyncAddress(0x1D17792);
+RelocAddr<uintptr_t> VsyncAddress(0x61E0950);
+
+long long CurrentFPS, FPSui, loadingFPSmax, lockpickingFPSmax, timing;
+RelocAddr<uintptr_t> FPSLimiter(0x1D0B67E);
+
+bool limit = false;
+float fpslimitgame, fpslimitload, fpslockpicking, SittingRotSpeedX, SittingRotSpeedY, PostloadingMenuSpeed;
+int isLockpicking, NumOfThreadsWhileLoading, NumOfThreadsWhileLoadingNewGame, fpslimit, isLimiting, SwapBufferCount, DXGISwapEffect, ScalingMode;
+unsigned int nMaxProcessorMask;
+unsigned int nMaxProcessorMaskNG;
+unsigned int nMaxProcessorAfterLoad;
+HANDLE f4handle = NULL;
+double maxft, minft;
+bool Fullscreen, FixLockpickingSound, accelerateLoading, UntieSpeedFromFPS, DisableiFPSClamp, FixStuttering, FixWorkshopRotationSpeed, FixRotationSpeed, FixSittingRotationSpeed, FixStuckAnimation, limitload, limitgame, LimitCPUThreadsNG, DisableAnimationOnLoadingScreens, DisableBlackLoadingScreens, FixWindSpeed, FixWhiteScreen, FixLoadingModel, ReduceAfterLoading, FixCPUThreads, OnlyOnLoadingScreens, WriteLoadingTime, Vsync, Tearing, ResizeBuffersDisable, ResizeTargetDisable, Borderless, FixMotionResponsive;
+bool firstload = true;
+F4SEScaleformInterface* g_scaleform = NULL;
+F4SEMessagingInterface* g_messaging = NULL;
+PluginHandle			    g_pluginHandle = kPluginHandle_Invalid;
+
+int PresentInterval0 = 0;
+int PresentInterval1 = 1;
+
+static F4SEPapyrusInterface* g_papyrus = NULL;
 
 float GetPrivateProfileFloat(LPCSTR lpAppName, LPCSTR lpKeyName, FLOAT flDefault, LPCSTR lpFileName)
 {
@@ -33,59 +46,12 @@ float GetPrivateProfileFloat(LPCSTR lpAppName, LPCSTR lpKeyName, FLOAT flDefault
 	return (float)atof(szData);
 }
 
-//Ini File
-#define INI_FILE "data\\F4SE\\Plugins\\HighFPSPhysicsFix.ini"
-
-float f = 0.017;
-bool firstload = true;
-int isLockpicking, isLoading, NumOfThreadsWhileLoading, NumOfThreadsWhileLoadingNewGame, fpslimit, isLimiting;
-unsigned int nMaxProcessorMask;
-unsigned int nMaxProcessorMaskNG;
-unsigned int nMaxProcessorAfterLoad;
-bool FixLockpickingSound, accelerateLoading, vsync, UntieSpeedFromFPS, DisableiFPSClamp, FixStuttering, FixWorkshopRotationSpeed, FixRotationSpeed, FixSittingRotationSpeed, FixStuckAnimation, limitload, limitgame, LimitCPUThreadsNG, DisableAnimationOnLoadingScreens, DisableBlackLoadingScreens, FixWindSpeed, FixWhiteScreen, FixLoadingModel, ReduceAfterLoading, FixCPUThreads, OnlyOnLoadingScreens, WriteLoadingTime, ForceSwapEffect;
-float fpslimitgame, fpslimitload, fpslockpicking, SittingRotSpeedX, SittingRotSpeedY, PostloadingMenuSpeed;
-PerfCounter PerfCounter::m_Instance;
-long long PerfCounter::perf_freq;
-float PerfCounter::perf_freqf;
-DXGI_SWAP_EFFECT SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-RelocAddr<uintptr_t> PostloadingMenuSpeedAddress(0x126DAEB);
-RelocAddr<uintptr_t> SittingRotationSpeedXAddress(0x3804738);
-RelocAddr<uintptr_t> SittingRotationSpeedYAddress(0x3804750);
-RelocAddr<uintptr_t> FixCPUThreadsAddress(0x1B10D59);
-RelocAddr<uintptr_t> FixCPUThreadsOnLoaddingAddress(0x18C62F);
-RelocAddr<uintptr_t> D3D11CreateDeviceAndSwapChainAddress(0x1D17879);
-
-long long CurrentFPS, FPSui, loadingFPSmax, lockpickingFPSmax, timing;
-RelocAddr<uintptr_t> FPSLimiter(0x1D0B67E);
-
-HANDLE f4handle = NULL;
-double maxft, minft;
-
-
-int iPresentInterval0 = 0;
-int iPresentInterval1 = 1;
-F4SEScaleformInterface* g_scaleform = NULL;
-F4SEMessagingInterface* g_messaging = NULL;
-PluginHandle			    g_pluginHandle = kPluginHandle_Invalid;
-
-static F4SEPapyrusInterface* g_papyrus = NULL;
-
 typedef void(*_ChangeThreads)(void* unk1, void* unk2, void* unk3, void* unk4);
 _ChangeThreads ChangeThreads_Original = nullptr;
 typedef void(*_ChangeThreadsNewGame)(void* unk1, void* unk2, void* unk3, void* unk4);
 _ChangeThreadsNewGame ChangeThreadsNewGame_Original = nullptr;
 typedef void(*_ReturnThreadsNewGame)(void* unk1, void* unk2, void* unk3, void* unk4);
 _ReturnThreadsNewGame ReturnThreadsNewGame_Original = nullptr;
-
-PFN_D3D11_CREATE_DEVICE_AND_SWAP_CHAIN D3D11CreateDeviceAndSwapChain_Original = nullptr;
-
-#pragma pack(push, 1)
-struct CB5Code
-{
-	uint8_t	op;
-	int32_t	displ;
-};
-#pragma pack(pop)
 
 class MenuOpenCloseHandler : public BSTEventSink<MenuOpenCloseEvent>
 	{
@@ -107,7 +73,163 @@ void getinisettings() {
 	char buf[256];
 	std::string value;
 	std::ostringstream os;
+
+	os << "\nFull screen: ";
+
+	GetPrivateProfileString("Display", "FullScreen", "false", buf, sizeof(buf), INI_FILE);
+	value = ToLowerStr(buf);
+	if (value == "true") {
+		Fullscreen = true;
+		os << "enabled";
+	}
+	else {
+		Fullscreen = false;
+		os << "disabled";
+	}
+
+	os << "\nBorderless screen: ";
+
+	GetPrivateProfileString("Display", "Borderless", "true", buf, sizeof(buf), INI_FILE);
+	value = ToLowerStr(buf);
+	if (value == "true") {
+		Borderless = true;
+		os << "enabled";
+	}
+	else {
+		Borderless = false;
+		os << "disabled";
+	}
+
+	os << "\nVSync (in Game): ";
+
+	//VSync
+	GetPrivateProfileString("Display", "EnableVSync", "true", buf, sizeof(buf), INI_FILE);
+	value = ToLowerStr(buf);
+	if (value == "true") {
+		Vsync = true;
+		os << "enabled";
+	}
+	else {
+		Vsync = false;
+		os << "disabled";
+	}
+
+	os << "\nVSync (in Loading Screens): ";
+
+	//Load Acceleration
+	GetPrivateProfileString("Display", "DisableVSyncWhileLoading", "true", buf, sizeof(buf), INI_FILE);
+	value = ToLowerStr(buf);
+	if (value == "true" && !DisableAnimationOnLoadingScreens) {
+		accelerateLoading = true;
+		os << "disabled";
+	}
+	else {
+		accelerateLoading = false;
+		os << "enabled";
+	}
+
+	os << "\nNumber of buffers in the swap chain: ";
+
+	SwapBufferCount = GetPrivateProfileIntA("Display", "BufferCount", 0, INI_FILE);
+	if (SwapBufferCount == 0) {
+		os << "auto";
+	}
+	else {
+		os << SwapBufferCount;
+	}
+
+	os << "\nResize buffers: ";
+
+	GetPrivateProfileString("Display", "ResizeBuffersDisable", "false", buf, sizeof(buf), INI_FILE);
+	value = ToLowerStr(buf);
+	if (value == "true") {
+		ResizeBuffersDisable = true;
+		os << "enabled";
+	}
+	else {
+		ResizeBuffersDisable = false;
+		os << "disabled";
+	}
+
+	os << "\nResize target: ";
+
+	GetPrivateProfileString("Display", "ResizeTargetDisable", "false", buf, sizeof(buf), INI_FILE);
+	value = ToLowerStr(buf);
+	if (value == "true") {
+		ResizeTargetDisable = true;
+		os << "enabled";
+	}
+	else {
+		ResizeTargetDisable = false;
+		os << "disabled";
+	}
 	
+	os << "\nDXGI swap effect: ";
+
+	DXGISwapEffect = GetPrivateProfileIntA("Display", "SwapEffect", 0, INI_FILE);
+	if (DXGISwapEffect == 0) {
+		os << "auto";
+	}
+	if (DXGISwapEffect == 1) {
+		DXGI_SWAP_EFFECT nse = DXGI_SWAP_EFFECT_DISCARD;
+		DXGI_SWAP_EFFECT se = DXGI_SWAP_EFFECT_DISCARD;
+		os << "discard";
+	}
+	if (DXGISwapEffect == 2) {
+		DXGI_SWAP_EFFECT nse = DXGI_SWAP_EFFECT_SEQUENTIAL;
+		DXGI_SWAP_EFFECT se = DXGI_SWAP_EFFECT_SEQUENTIAL;
+		os << "sequential";
+	}
+	if (DXGISwapEffect == 3) {
+		DXGI_SWAP_EFFECT nse = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+		DXGI_SWAP_EFFECT se = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+		os << "flip_sequential";
+	}
+	if (DXGISwapEffect == 4) {
+		DXGI_SWAP_EFFECT nse = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+		DXGI_SWAP_EFFECT se = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+		os << "flip_discard";
+	}
+
+	os << "\nAllow tearing: ";
+
+	GetPrivateProfileString("Display", "AllowTearing", "true", buf, sizeof(buf), INI_FILE);
+	value = ToLowerStr(buf);
+	if (value == "true") {
+		Tearing = true;
+		os << "enabled";
+	}
+	else {
+		Tearing = false;
+		os << "disabled";
+	}
+
+	os << "\nDXGI mode scalling: ";
+
+	ScalingMode = GetPrivateProfileIntA("Display", "ScalingMode", 0, INI_FILE);
+	if (ScalingMode == 1) {
+		os << "unspecified";
+	}
+	if (ScalingMode == 2) {
+		os << "centered";
+	}
+	if (ScalingMode == 3) {
+		os << "stretched";
+	}
+
+	os << "\nProcessWindowGhosting: ";
+
+	//Ghosting
+	GetPrivateProfileString("Display", "DisableProcessWindowsGhosting", "true", buf, sizeof(buf), INI_FILE);
+	value = ToLowerStr(buf);
+	if (value == "true") {
+		DisableProcessWindowsGhosting();
+		os << "enabled";
+	}
+	else {
+		os << "disabled";
+	}
+
 	os << "\nUntie game speed from framerate: ";
 
 	//Fix game speed
@@ -136,53 +258,13 @@ void getinisettings() {
 		os << "disabled";
 	}
 
-	os << "\nVSync (in Game): ";
-
-	//VSync
-	GetPrivateProfileString("Main", "EnableVSync", "true", buf, sizeof(buf), INI_FILE);
-	value = ToLowerStr(buf);
-	if (value == "true") {
-		vsync = true;
-		os << "enabled";
-	}
-	else {
-		vsync = false;
-		os << "disabled";
-	}
-
-	os << "\nVSync (in Loading Screens): ";
-
-	//Load Acceleration
-	GetPrivateProfileString("Main", "DisableVSyncWhileLoading", "false", buf, sizeof(buf), INI_FILE);
-	value = ToLowerStr(buf);
-	if (value == "true" && !DisableAnimationOnLoadingScreens) {
-		accelerateLoading = true;
-		os << "disabled";
-	}
-	else {
-		accelerateLoading = false;
-		os << "enabled";
-	}
-
-	os << "\nProcessWindowGhosting: ";
-
-	//Ghosting
-	GetPrivateProfileString("Main", "DisableProcessWindowsGhosting", "false", buf, sizeof(buf), INI_FILE);
-	value = ToLowerStr(buf);
-	if (value == "true") {
-		DisableProcessWindowsGhosting();
-		os << "enabled";
-	}
-	else {
-		os << "disabled";
-	}
-
 	//Limiters
 
 	float ingamefps = GetPrivateProfileFloat("Limiter", "InGameFPS", 0, INI_FILE);
 	os << "\nLimit(ingame): ";
 	if (ingamefps > 0) {
 		limitgame = true;
+		limit = true;
 		fpslimitgame = 1.0 / ingamefps;
 		os << ingamefps << "FPS / " << fpslimitgame * 1000.0 << "ms";
 	}
@@ -195,6 +277,7 @@ void getinisettings() {
 	if (accelerateLoading) {
 		if (loadscreenfps > 0) {
 			limitload = true;
+			limit = true;
 			fpslimitload = 1.0 / loadscreenfps;
 			os << loadscreenfps << "FPS / " << fpslimitload * 1000.0 << "ms";
 		}
@@ -209,6 +292,7 @@ void getinisettings() {
 	os << "\nLimit lockpicking: ";
 	if (LockpickingFPS > 0) {
 		FixLockpickingSound = true;
+		limit = true;
 		fpslockpicking = 1.0 / LockpickingFPS;
 		os << LockpickingFPS << "FPS / " << fpslockpicking * 1000.0 << "ms";
 	}
@@ -426,59 +510,18 @@ void getinisettings() {
 		os << "disabled";
 	}
 
-	_MESSAGE(os.str().c_str());
-}
+	os << "\nFix motion responsive: ";
 
-void getinisettings_early()
-{
-	char buf[256];
-	std::string value;
-	std::ostringstream os;
-
-	os << "\nForce swap effect: ";
-
-	//Force swap effect
-	GetPrivateProfileString("Main", "ForceSwapEffect", "false", buf, sizeof(buf), INI_FILE);
+	GetPrivateProfileString("Fixes", "FixMotionResponsive", "true", buf, sizeof(buf), INI_FILE);
 	value = ToLowerStr(buf);
-	if (value == "true")
-	{
-		ForceSwapEffect = true;
-		os << "enabled";
+	if (value == "true") {
+		FixMotionResponsive = true;
+		os << "enabled\n";
 	}
-	else
-	{
-		ForceSwapEffect = false;
-		os << "disabled";
+	else {
+		FixMotionResponsive = false;
+		os << "disabled\n";
 	}
-
-	//Select the swap effect
-	if (ForceSwapEffect == true)
-	{
-		os << "\nSwap effect: ";
-		GetPrivateProfileString("Main", "SwapEffect", "flip_discard", buf, sizeof(buf), INI_FILE);
-		value = ToLowerStr(buf);
-		if (value == "discard")
-		{
-			SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
-			os << "discard";
-		}
-		else if (value == "sequential")
-		{
-			SwapEffect = DXGI_SWAP_EFFECT_SEQUENTIAL;
-			os << "sequential";
-		}
-		else if (value == "flip_sequential")
-		{
-			SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
-			os << "flip_sequential";
-		}
-		else if (value == "flip_discard")
-		{
-			SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-			os << "flip_discard";
-		}
-	}
-
 	_MESSAGE(os.str().c_str());
 }
 
@@ -501,9 +544,6 @@ void ReturnThreadsNewGame(void* unk1, void* unk2, void* unk3, void* unk4) {
 }
 
 void HookFPS() {
-	if (!vsync) {
-		SafeWriteBuf(RelocAddr<uintptr_t>(0x61E0950).GetUIntPtr(), &iPresentInterval0, sizeof(iPresentInterval0));
-	}
 	if (DisableiFPSClamp) {
 		float clamp = 0;
 		SafeWriteBuf(RelocAddr<uintptr_t>(0x5B5B6C8).GetUIntPtr(), &clamp, sizeof(float));
@@ -524,6 +564,7 @@ void HookFPS() {
 }
 
 clock_t start, end;
+
 //Detect loading screen and lockpicking menu
 EventResult	MenuOpenCloseHandler::ReceiveEvent(MenuOpenCloseEvent* evn, void* dispatcher)
 {
@@ -535,17 +576,22 @@ EventResult	MenuOpenCloseHandler::ReceiveEvent(MenuOpenCloseEvent* evn, void* di
 			if (WriteLoadingTime) {
 				start = clock();
 			}
+			CurrentFPS = loadingFPSmax;
 			if (accelerateLoading) {
-				CurrentFPS = loadingFPSmax;
-				isLoading = 1;
-				SafeWriteBuf(RelocAddr<uintptr_t>(0x61E0950).GetUIntPtr(), &iPresentInterval0, sizeof(iPresentInterval0));
+				if (Vsync) {
+					SafeWriteBuf(VsyncAddress.GetUIntPtr(), &PresentInterval0, sizeof(PresentInterval0));
+					SetFPSLimitOverride();
+				}
 			}
 		}
 		else
 		{
+			CurrentFPS = FPSui;
 			if (accelerateLoading) {
-				CurrentFPS = FPSui;
-				isLoading = 0;
+				if (Vsync) {
+					SafeWriteBuf(VsyncAddress.GetUIntPtr(), &PresentInterval1, sizeof(PresentInterval1));
+					ResetFPSLimitOverride();
+				}
 			}
 			if (WriteLoadingTime) {
 				end = clock();
@@ -554,12 +600,6 @@ EventResult	MenuOpenCloseHandler::ReceiveEvent(MenuOpenCloseEvent* evn, void* di
 			if (isLimiting == 1) {
 				SetProcessAffinityMask(f4handle, nMaxProcessorAfterLoad);
 				isLimiting = 0;
-			}
-			if (!vsync) {
-				SafeWriteBuf(RelocAddr<uintptr_t>(0x61E0950).GetUIntPtr(), &iPresentInterval0, sizeof(iPresentInterval0));
-			}
-			else {
-				SafeWriteBuf(RelocAddr<uintptr_t>(0x61E0950).GetUIntPtr(), &iPresentInterval1, sizeof(iPresentInterval1));
 			}
 		}
 	}
@@ -578,12 +618,6 @@ EventResult	MenuOpenCloseHandler::ReceiveEvent(MenuOpenCloseEvent* evn, void* di
 			if (FixLockpickingSound) {
 				CurrentFPS = FPSui;
 				isLockpicking = 0;
-			}
-			if (!vsync) {
-				SafeWriteBuf(RelocAddr<uintptr_t>(0x61E0950).GetUIntPtr(), &iPresentInterval0, sizeof(iPresentInterval0));
-			}
-			else {
-				SafeWriteBuf(RelocAddr<uintptr_t>(0x61E0950).GetUIntPtr(), &iPresentInterval1, sizeof(iPresentInterval1));
 			}
 		}
 	}
@@ -604,6 +638,7 @@ void LimitCPUNewGame() {
 				dq(RelocAddr<uintptr_t>(0x12A23F5).GetUIntPtr() + 5);
 			}
 		};
+		_MESSAGE("Limit CPU threads patching...");
 		void* codeBuf = g_localTrampoline.StartAlloc();
 		ChangeThreadsNewGame_Code code(codeBuf);
 		g_localTrampoline.EndAlloc(code.getCurr());
@@ -611,6 +646,7 @@ void LimitCPUNewGame() {
 		ChangeThreadsNewGame_Original = (_ChangeThreadsNewGame)codeBuf;
 
 		g_branchTrampoline.Write5Branch(RelocAddr<uintptr_t>(0x12A23F5).GetUIntPtr(), (uintptr_t)SetThreadsNewGame);
+		_MESSAGE("Limit CPU threads OK");
 }
 
 void ReturnThreads() {
@@ -627,6 +663,7 @@ void ReturnThreads() {
 				dq(RelocAddr<uintptr_t>(0xD1D4A0).GetUIntPtr() + 6);
 			}
 		};
+		_MESSAGE("Return CPU threads patching...");
 		void* codeBuf = g_localTrampoline.StartAlloc();
 		ReturnThreadsNewGame_Code code(codeBuf);
 		g_localTrampoline.EndAlloc(code.getCurr());
@@ -634,6 +671,7 @@ void ReturnThreads() {
 		ReturnThreadsNewGame_Original = (_ReturnThreadsNewGame)codeBuf;
 
 		g_branchTrampoline.Write5Branch(RelocAddr<uintptr_t>(0xD1D4A0).GetUIntPtr(), (uintptr_t)ReturnThreadsNewGame);
+		_MESSAGE("Return CPU threads OK");
 }
 
 void LimiterFunc() {
@@ -659,9 +697,6 @@ void PatchGame() {
 	}
 	if (OnlyOnLoadingScreens) {
 		SafeWriteBuf(FixCPUThreadsOnLoaddingAddress.GetUIntPtr(), "\x90\x90\x90\x90\x90", 5);
-	}
-	if (vsync) {
-		SafeWriteBuf(RelocAddr<uintptr_t>(0x61E0950).GetUIntPtr(), &iPresentInterval1, sizeof(iPresentInterval1));
 	}
 	if (UntieSpeedFromFPS) {
 		unsigned char data1[] = { 0xBA, 0x00, 0x00, 0x00, 0x00 };
@@ -774,6 +809,12 @@ void PatchGame() {
 		unsigned char data13[] = { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 };
 		SafeWriteBuf(RelocAddr<uintptr_t>(0x1298EA3).GetUIntPtr(), &data13, sizeof(data13));
 	}
+	if (FixMotionResponsive) {
+		float MotionFeedback = 294.1176470588235;
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x2845F5).GetUIntPtr(), &MotionFeedback, sizeof(float));
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x2844EB).GetUIntPtr(), "\xE9\xAC\x00\x00\x00\x0F\x2F\xC1\x90\x90\x90\x90", 12);
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x28459C).GetUIntPtr(), "\xF3\x0F\x10\x45\x40\xF3\x0F\x10\x0D\x4C\x00\x00\x00\xF3\x0F\x59\xCE\xEB\x05\xCC\xC2\x00\x00\xCC\xE9\x37\xFF\xFF\xFF", 29);
+	}
 }
 
 void onF4SEMessage(F4SEMessagingInterface::Message* msg) {
@@ -782,22 +823,15 @@ void onF4SEMessage(F4SEMessagingInterface::Message* msg) {
 		static auto pMenuOpenCloseHandler = new MenuOpenCloseHandler();
 		(*g_ui)->menuOpenCloseEventSource.AddEventSink(pMenuOpenCloseHandler);
 		if (firstload) {
-			getinisettings();
 			PatchGame();
-			_MESSAGE("\nPatching is complete!");
-			if (vsync) {
-				SafeWriteBuf(RelocAddr<uintptr_t>(0x61E0950).GetUIntPtr(), &iPresentInterval1, sizeof(iPresentInterval1));
-			}
 			HookFPS();
 			if (LimitCPUThreadsNG) {
 				_MESSAGE("Getting the number of processor threads...");
 				GetNumberOfThreads();
-				_MESSAGE("Threads limitation...");
 				LimitCPUNewGame();
 				ReturnThreads();
 			}
-			if (limitload || limitgame || FixLockpickingSound) {
-				_MESSAGE("FPS limitation...");
+			if (limit) {
 				timing = _Query_perf_counter();
 				RegisterHooks();
 			}
@@ -806,34 +840,6 @@ void onF4SEMessage(F4SEMessagingInterface::Message* msg) {
 		}
 		break;
 	}
-}
-
-void SetSwapEffect(DXGI_SWAP_CHAIN_DESC* pSwapChainDesc)
-{
-	if (pSwapChainDesc->Windowed == TRUE)
-	{
-		_MESSAGE("\nSetting swap effect...");
-		pSwapChainDesc->SwapEffect = SwapEffect;
-	}
-}
-
-HRESULT WINAPI D3D11CreateDeviceAndSwapChain_Hook(
-	_In_opt_ IDXGIAdapter* pAdapter,
-	D3D_DRIVER_TYPE DriverType,
-	HMODULE Software,
-	UINT Flags,
-	_In_reads_opt_(FeatureLevels) CONST D3D_FEATURE_LEVEL* pFeatureLevels,
-	UINT FeatureLevels,
-	UINT SDKVersion,
-	_In_opt_ CONST DXGI_SWAP_CHAIN_DESC* pSwapChainDesc,
-	_COM_Outptr_opt_ IDXGISwapChain** ppSwapChain,
-	_COM_Outptr_opt_ ID3D11Device** ppDevice,
-	_Out_opt_ D3D_FEATURE_LEVEL* pFeatureLevel,
-	_COM_Outptr_opt_ ID3D11DeviceContext** ppImmediateContext)
-{
-	SetSwapEffect(const_cast<DXGI_SWAP_CHAIN_DESC*>(pSwapChainDesc));
-	_MESSAGE("Calling original D3D11CreateDeviceAndSwapChain!");
-	return D3D11CreateDeviceAndSwapChain_Original(pAdapter, DriverType, Software, Flags, pFeatureLevels, FeatureLevels, SDKVersion, pSwapChainDesc, ppSwapChain, ppDevice, pFeatureLevel, ppImmediateContext);
 }
 
 extern "C"
@@ -894,18 +900,14 @@ extern "C"
 			_ERROR("couldn't create codegen buffer. this is fatal. skipping remainder of init process.");
 			return false;
 		}
-
-		// Needs to be earlier than onF4SEMessage
-		getinisettings_early();
-		if (ForceSwapEffect)
-		{
-			// Hooking method from https://github.com/SlavicPotato/sse-build-resources/blob/master/ext/IHook.h
-			auto ins = reinterpret_cast<CB5Code*>(D3D11CreateDeviceAndSwapChainAddress.GetUIntPtr());
-			uintptr_t o = D3D11CreateDeviceAndSwapChainAddress + sizeof(CB5Code) + ins->displ;
-			D3D11CreateDeviceAndSwapChain_Original = reinterpret_cast<PFN_D3D11_CREATE_DEVICE_AND_SWAP_CHAIN>(o);
-			g_branchTrampoline.Write5Call(D3D11CreateDeviceAndSwapChainAddress, reinterpret_cast<uintptr_t>(D3D11CreateDeviceAndSwapChain_Hook));
+		getinisettings();
+		PatchDisplay();
+		Hook();
+		//Disable bethesda auto Vsync
+		SafeWriteBuf(BethesdaVsyncAddress.GetUIntPtr(), "\x90\x90\x90\x90", 4);
+		if (Vsync) {
+			SafeWriteBuf(VsyncAddress.GetUIntPtr(), &PresentInterval1, sizeof(PresentInterval1));
 		}
-
 		g_messaging->RegisterListener(g_pluginHandle, "F4SE", onF4SEMessage);
 		return true;
 	}
