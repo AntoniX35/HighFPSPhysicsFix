@@ -1,7 +1,5 @@
 #include "stdafx.h"
 RelocAddr<uintptr_t> FullscreenAddress(0xD42361);
-RelocAddr<uintptr_t> FullscreenAddress1(0xCAACA1);
-RelocAddr<uintptr_t> FullscreenAddress2(0xCAAC77);
 RelocAddr<uintptr_t> BorderlessAddress(0xD4236C);
 RelocAddr<uintptr_t> CreateDXGIFactoryAddress(0x1D1748B);
 RelocAddr<uintptr_t> D3D11CreateDeviceAndSwapChainAddress(0x1D17879);

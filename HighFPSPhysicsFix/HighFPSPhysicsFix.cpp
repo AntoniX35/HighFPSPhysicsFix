@@ -10,9 +10,10 @@ float PerfCounter::perf_freqf;
 RelocAddr<uintptr_t> PostloadingMenuSpeedAddress(0x126DAEB);
 RelocAddr<uintptr_t> SittingRotationSpeedXAddress(0x3804738);
 RelocAddr<uintptr_t> SittingRotationSpeedYAddress(0x3804750);
-RelocAddr<uintptr_t> FixCPUThreadsAddress(0x1B10D59);
-RelocAddr<uintptr_t> FixCPUThreadsOnLoaddingAddress(0x18C62F);
+RelocAddr<uintptr_t> FixCPUThreadsAddress(0xE9B7E1);
 RelocAddr<uintptr_t> BethesdaVsyncAddress(0x1D17792);
+RelocAddr<uintptr_t> BethesdaFPSCap1Address(0xD423BA);
+RelocAddr<uintptr_t> BethesdaFPSCap2Address(0xD423C3);
 RelocAddr<uintptr_t> VsyncAddress(0x61E0950);
 
 long long CurrentFPS, FPSui, loadingFPSmax, lockpickingFPSmax, timing;
@@ -26,7 +27,7 @@ unsigned int nMaxProcessorMaskNG;
 unsigned int nMaxProcessorAfterLoad;
 HANDLE f4handle = NULL;
 double maxft, minft;
-bool Fullscreen, FixLockpickingSound, accelerateLoading, UntieSpeedFromFPS, DisableiFPSClamp, FixStuttering, FixWorkshopRotationSpeed, FixRotationSpeed, FixSittingRotationSpeed, FixStuckAnimation, limitload, limitgame, LimitCPUThreadsNG, DisableAnimationOnLoadingScreens, DisableBlackLoadingScreens, FixWindSpeed, FixWhiteScreen, FixLoadingModel, ReduceAfterLoading, FixCPUThreads, OnlyOnLoadingScreens, WriteLoadingTime, Vsync, Tearing, ResizeBuffersDisable, ResizeTargetDisable, Borderless, FixMotionResponsive;
+bool Fullscreen, FixLockpickingSound, accelerateLoading, UntieSpeedFromFPS, DisableiFPSClamp, FixStuttering, FixWorkshopRotationSpeed, FixRotationSpeed, FixSittingRotationSpeed, FixStuckAnimation, limitload, limitgame, LimitCPUThreadsNG, DisableAnimationOnLoadingScreens, DisableBlackLoadingScreens, FixWindSpeed, FixWhiteScreen, FixLoadingModel, ReduceAfterLoading, FixCPUThreads, WriteLoadingTime, Vsync, Tearing, ResizeBuffersDisable, ResizeTargetDisable, Borderless, FixMotionResponsive;
 bool firstload = true;
 F4SEScaleformInterface* g_scaleform = NULL;
 F4SEMessagingInterface* g_messaging = NULL;
@@ -368,22 +369,6 @@ void getinisettings() {
 		os << "disabled";
 	}
 
-	os << "\nEnable limit threads only on loading screens: ";
-
-	//Only on loading screens
-	GetPrivateProfileString("Fixes", "OnlyOnLoadingScreens", "true", buf, sizeof(buf), INI_FILE);
-	value = ToLowerStr(buf);
-	if (value == "true") {
-		os << "enabled";
-		if (FixCPUThreads) {
-			OnlyOnLoadingScreens = true;
-		}
-	}
-	else {
-		OnlyOnLoadingScreens = false;
-		os << "disabled";
-	}
-
 	os << "\nWrite loading time to log: ";
 
 	//Write loading time to log
@@ -595,7 +580,7 @@ EventResult	MenuOpenCloseHandler::ReceiveEvent(MenuOpenCloseEvent* evn, void* di
 			}
 			if (WriteLoadingTime) {
 				end = clock();
-				_MESSAGE("Loading time: %.0f second(s)", ((double)end - start) / ((double)CLOCKS_PER_SEC));
+				_MESSAGE("Loading time: %.2f second(s)", ((double)end - start) / ((double)CLOCKS_PER_SEC));
 			}
 			if (isLimiting == 1) {
 				SetProcessAffinityMask(f4handle, nMaxProcessorAfterLoad);
@@ -692,11 +677,8 @@ void RegisterHooks() {
 }
 
 void PatchGame() {
-	if (FixCPUThreads && !OnlyOnLoadingScreens) {
-		SafeWriteBuf(FixCPUThreadsAddress.GetUIntPtr(), "\x90\x90", 2);
-	}
-	if (OnlyOnLoadingScreens) {
-		SafeWriteBuf(FixCPUThreadsOnLoaddingAddress.GetUIntPtr(), "\x90\x90\x90\x90\x90", 5);
+	if (FixCPUThreads) {
+		SafeWriteBuf(FixCPUThreadsAddress.GetUIntPtr(), "\xEB\x14", 2); //74 14
 	}
 	if (UntieSpeedFromFPS) {
 		unsigned char data1[] = { 0xBA, 0x00, 0x00, 0x00, 0x00 };
@@ -903,8 +885,11 @@ extern "C"
 		getinisettings();
 		PatchDisplay();
 		Hook();
-		//Disable bethesda auto Vsync
+		//Disable bethesda auto Vsync and FPS cap
 		SafeWriteBuf(BethesdaVsyncAddress.GetUIntPtr(), "\x90\x90\x90\x90", 4);
+		uint32_t maxrefreshrate = 10000;
+		SafeWriteBuf(BethesdaFPSCap1Address.GetUIntPtr(), &maxrefreshrate, sizeof(maxrefreshrate));
+		SafeWriteBuf(BethesdaFPSCap2Address.GetUIntPtr(), &maxrefreshrate, sizeof(maxrefreshrate));
 		if (Vsync) {
 			SafeWriteBuf(VsyncAddress.GetUIntPtr(), &PresentInterval1, sizeof(PresentInterval1));
 		}
