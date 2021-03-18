@@ -11,3 +11,7 @@
 #define SUPPORTED_RUNTIME_VERSION   CURRENT_RELEASE_RUNTIME
 #define MINIMUM_RUNTIME_VERSION     RUNTIME_VERSION_1_10_163
 #define COMPATIBLE(runtimeVersion)  (runtimeVersion == SUPPORTED_RUNTIME_VERSION)
+
+#define PLUGIN_BASE_PATH            "Data\\F4SE\\Plugins\\"
+
+static inline constexpr const char* PLUGIN_INI_FILE = PLUGIN_BASE_PATH PLUGIN_NAME_SHORT ".ini";

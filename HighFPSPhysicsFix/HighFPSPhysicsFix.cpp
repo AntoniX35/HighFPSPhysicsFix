@@ -1,33 +1,33 @@
 ﻿#include "stdafx.h"
-//Ini File
-#define INI_FILE "data\\F4SE\\Plugins\\HighFPSPhysicsFix.ini"
+#include "INIReader.h"
 
 float f = 0.017;
 PerfCounter PerfCounter::m_Instance;
 long long PerfCounter::perf_freq;
 float PerfCounter::perf_freqf;
 
+RelocAddr<uintptr_t> FPSLimiter(0x1D0B67E);
 RelocAddr<uintptr_t> PostloadingMenuSpeedAddress(0x126DAEB);
 RelocAddr<uintptr_t> SittingRotationSpeedXAddress(0x3804738);
 RelocAddr<uintptr_t> SittingRotationSpeedYAddress(0x3804750);
-RelocAddr<uintptr_t> FixCPUThreadsAddress(0xE9B7E1);
+RelocAddr<uintptr_t> FixCPUThreadsAddress1(0xE9B7E1);
+RelocAddr<uintptr_t> FixCPUThreadsAddress2(0xD69DCF);
 RelocAddr<uintptr_t> BethesdaVsyncAddress(0x1D17792);
 RelocAddr<uintptr_t> BethesdaFPSCap1Address(0xD423BA);
 RelocAddr<uintptr_t> BethesdaFPSCap2Address(0xD423C3);
 RelocAddr<uintptr_t> VsyncAddress(0x61E0950);
 
 long long CurrentFPS, FPSui, loadingFPSmax, lockpickingFPSmax, timing;
-RelocAddr<uintptr_t> FPSLimiter(0x1D0B67E);
-
+__int64	FSAddress;
 bool limit = false;
 float fpslimitgame, fpslimitload, fpslockpicking, SittingRotSpeedX, SittingRotSpeedY, PostloadingMenuSpeed;
-int isLockpicking, NumOfThreadsWhileLoading, NumOfThreadsWhileLoadingNewGame, fpslimit, isLimiting, SwapBufferCount, DXGISwapEffect, ScalingMode;
+int isLockpicking, NumOfThreadsWhileLoading, NumOfThreadsWhileLoadingNewGame, fpslimit, isLimiting, SwapBufferCount, DXGISwapEffect, ScalingMode, FullScr;
 unsigned int nMaxProcessorMask;
 unsigned int nMaxProcessorMaskNG;
 unsigned int nMaxProcessorAfterLoad;
 HANDLE f4handle = NULL;
 double maxft, minft;
-bool Fullscreen, FixLockpickingSound, accelerateLoading, UntieSpeedFromFPS, DisableiFPSClamp, FixStuttering, FixWorkshopRotationSpeed, FixRotationSpeed, FixSittingRotationSpeed, FixStuckAnimation, limitload, limitgame, LimitCPUThreadsNG, DisableAnimationOnLoadingScreens, DisableBlackLoadingScreens, FixWindSpeed, FixWhiteScreen, FixLoadingModel, ReduceAfterLoading, FixCPUThreads, WriteLoadingTime, Vsync, Tearing, ResizeBuffersDisable, ResizeTargetDisable, Borderless, FixMotionResponsive;
+bool EnableDisplayTweaks, Fullscreen, FixLockpickingSound, accelerateLoading, UntieSpeedFromFPS, DisableiFPSClamp, FixStuttering, FixWorkshopRotationSpeed, FixRotationSpeed, FixSittingRotationSpeed, FixStuckAnimation, limitload, limitgame, LimitCPUThreadsNG, DisableAnimationOnLoadingScreens, DisableBlackLoadingScreens, FixWindSpeed, FixWhiteScreen, FixLoadingModel, ReduceAfterLoading, FixCPUThreads, WriteLoadingTime, Vsync, Tearing, ResizeBuffersDisable, ResizeTargetDisable, Borderless, FixMotionResponsive;
 bool firstload = true;
 F4SEScaleformInterface* g_scaleform = NULL;
 F4SEMessagingInterface* g_messaging = NULL;
@@ -38,15 +38,6 @@ int PresentInterval1 = 1;
 
 static F4SEPapyrusInterface* g_papyrus = NULL;
 
-float GetPrivateProfileFloat(LPCSTR lpAppName, LPCSTR lpKeyName, FLOAT flDefault, LPCSTR lpFileName)
-{
-	char szData[32];
-
-	GetPrivateProfileStringA(lpAppName, lpKeyName, std::to_string(flDefault).c_str(), szData, 32, lpFileName);
-
-	return (float)atof(szData);
-}
-
 typedef void(*_ChangeThreads)(void* unk1, void* unk2, void* unk3, void* unk4);
 _ChangeThreads ChangeThreads_Original = nullptr;
 typedef void(*_ChangeThreadsNewGame)(void* unk1, void* unk2, void* unk3, void* unk4);
@@ -54,73 +45,63 @@ _ChangeThreadsNewGame ChangeThreadsNewGame_Original = nullptr;
 typedef void(*_ReturnThreadsNewGame)(void* unk1, void* unk2, void* unk3, void* unk4);
 _ReturnThreadsNewGame ReturnThreadsNewGame_Original = nullptr;
 
+clock_t start, end;
+
 class MenuOpenCloseHandler : public BSTEventSink<MenuOpenCloseEvent>
 	{
 	public:
 		virtual ~MenuOpenCloseHandler() { };
 		virtual	EventResult	ReceiveEvent(MenuOpenCloseEvent* evn, void* dispatcher) override;
-	};
-
-std::string ToLowerStr(std::string str)
-{
-	transform(str.begin(), str.end(), str.begin(), tolower);
-	return str;
-}
+};
 
 std::chrono::high_resolution_clock::time_point tlastf = std::chrono::high_resolution_clock::now(), tcurrentf = std::chrono::high_resolution_clock::now(), hvlast = std::chrono::high_resolution_clock::now(), hvcurrent = std::chrono::high_resolution_clock::now();
 std::chrono::duration<double> time_span, tdif;
 
 void getinisettings() {
-	char buf[256];
 	std::string value;
 	std::ostringstream os;
 
-	os << "\nFull screen: ";
+	INIReader reader(PLUGIN_INI_FILE);
+	if (reader.ParseError() < 0) {
+		_MESSAGE("Can't load 'HighFPSPhysics.ini'\n");
+	}
 
-	GetPrivateProfileString("Display", "FullScreen", "false", buf, sizeof(buf), INI_FILE);
-	value = ToLowerStr(buf);
-	if (value == "true") {
-		Fullscreen = true;
+	//Main
+
+	os << "\nUntie game speed from framerate: ";
+
+	UntieSpeedFromFPS = reader.GetBoolean("Main", "UntieSpeedFromFPS", true);
+	if (UntieSpeedFromFPS) {
 		os << "enabled";
 	}
 	else {
-		Fullscreen = false;
 		os << "disabled";
 	}
 
-	os << "\nBorderless screen: ";
+	os << "\nDisable iFPSClamp: ";
 
-	GetPrivateProfileString("Display", "Borderless", "true", buf, sizeof(buf), INI_FILE);
-	value = ToLowerStr(buf);
-	if (value == "true") {
-		Borderless = true;
+	DisableiFPSClamp = reader.GetBoolean("Main", "DisableiFPSClamp", true);
+	if (DisableiFPSClamp) {
 		os << "enabled";
 	}
 	else {
-		Borderless = false;
 		os << "disabled";
 	}
-
+	
 	os << "\nVSync (in Game): ";
 
-	//VSync
-	GetPrivateProfileString("Display", "EnableVSync", "true", buf, sizeof(buf), INI_FILE);
-	value = ToLowerStr(buf);
-	if (value == "true") {
-		Vsync = true;
+	Vsync = reader.GetBoolean("Main", "EnableVSync", true);
+	if (Vsync) {
 		os << "enabled";
 	}
 	else {
-		Vsync = false;
 		os << "disabled";
 	}
 
 	os << "\nVSync (in Loading Screens): ";
 
-	//Load Acceleration
-	GetPrivateProfileString("Display", "DisableVSyncWhileLoading", "true", buf, sizeof(buf), INI_FILE);
-	value = ToLowerStr(buf);
-	if (value == "true" && !DisableAnimationOnLoadingScreens) {
+	accelerateLoading = reader.GetBoolean("Main", "DisableVSyncWhileLoading", true);	
+	if (accelerateLoading && !DisableAnimationOnLoadingScreens) {
 		accelerateLoading = true;
 		os << "disabled";
 	}
@@ -129,9 +110,135 @@ void getinisettings() {
 		os << "enabled";
 	}
 
+	os << "\nLoading screens: ";
+
+	DisableBlackLoadingScreens = reader.GetBoolean("Main", "DisableBlackLoadingScreens", false);
+	if (DisableBlackLoadingScreens) {
+		os << "without black screens";
+	}
+	else {
+		os << "default";
+	}
+
+	os << "\nDisable animation on loading screens: ";
+
+	DisableAnimationOnLoadingScreens = reader.GetBoolean("Main", "DisableAnimationOnLoadingScreens", false);
+	if (DisableAnimationOnLoadingScreens) {
+		os << "enabled";
+	}
+	else {
+		os << "disabled";
+	}
+
+	os << "\nPostloading menu speed: ";
+
+	PostloadingMenuSpeed = reader.GetReal("Main", "PostloadingMenuSpeed", 1);
+	if (PostloadingMenuSpeed != 1) {
+		os << PostloadingMenuSpeed;
+		ReduceAfterLoading = true;
+	}
+	else {
+		ReduceAfterLoading = false;
+		os << "default";
+	}
+
+	os << "\nProcessWindowGhosting: ";
+
+	bool DisableGhosting = reader.GetBoolean("Main", "DisableProcessWindowsGhosting", true);
+	if (DisableGhosting) {
+		DisableProcessWindowsGhosting();
+		os << "enabled";
+	}
+	else {
+		os << "disabled";
+	}
+
+	//Limiters
+
+	float ingamefps = reader.GetReal("Limiter", "InGameFPS", 0);
+	os << "\nLimit(ingame): ";
+	if (ingamefps > 0) {
+		limitgame = true;
+		limit = true;
+		fpslimitgame = 1.0 / ingamefps;
+		os << ingamefps << "FPS / " << fpslimitgame * 1000.0 << "ms";
+	}
+	else {
+		os << "disabled, ";
+	}
+
+	float loadscreenfps = reader.GetReal("Limiter", "LoadingScreenFPS", 0);
+	os << " Limit(loading): ";
+	if (accelerateLoading) {
+		if (loadscreenfps > 0) {
+			limitload = true;
+			limit = true;
+			fpslimitload = 1.0 / loadscreenfps;
+			os << loadscreenfps << "FPS / " << fpslimitload * 1000.0 << "ms";
+		}
+		else {
+			os << "disabled";
+		}
+	}
+	else os << "disabled";
+
+	float LockpickingFPS = reader.GetReal("Limiter", "LockpickingFPS", 0);
+	os << "\nLimit lockpicking: ";
+	if (LockpickingFPS > 0) {
+		FixLockpickingSound = true;
+		limit = true;
+		fpslockpicking = 1.0 / LockpickingFPS;
+		os << LockpickingFPS << "FPS / " << fpslockpicking * 1000.0 << "ms";
+	}
+	else {
+		FixLockpickingSound = false;
+		os << "disabled";
+	}
+
+	NumOfThreadsWhileLoadingNewGame = reader.GetInteger("Limiter", "NumOfThreadsWhileLoadingNewGame", 1);
+	os << "\nNum of threads on loading screens (new game): ";
+	if (NumOfThreadsWhileLoadingNewGame > 0) {
+		os << NumOfThreadsWhileLoadingNewGame;
+		LimitCPUThreadsNG = true;
+	}
+	else {
+		LimitCPUThreadsNG = false;
+		os << "default";
+	}
+
+	os << "\nEnable display tweaks: ";
+
+	EnableDisplayTweaks = reader.GetBoolean("DisplayTweaks", "EnableDisplayTweaks", false);
+	if (EnableDisplayTweaks) {
+		os << "enabled";
+	}
+	else {
+		os << "disabled";
+	}
+
+	os << "\nFull screen: ";
+
+	Fullscreen = reader.GetBoolean("DisplayTweaks", "FullScreen", false);
+	if (value == "true") {
+		os << "enabled";
+	}
+	else {
+		os << "disabled";
+	}
+
+	os << "\nBorderless screen: ";
+
+	Borderless = reader.GetBoolean("DisplayTweaks", "Borderless", true);
+	if (Borderless) {
+		os << "enabled";
+	}
+	else {
+		os << "disabled";
+	}
+
 	os << "\nNumber of buffers in the swap chain: ";
 
-	SwapBufferCount = GetPrivateProfileIntA("Display", "BufferCount", 0, INI_FILE);
+	SwapBufferCount = reader.GetInteger("DisplayTweaks", "BufferCount", 0);
 	if (SwapBufferCount == 0) {
 		os << "auto";
 	}
@@ -141,33 +248,27 @@ void getinisettings() {
 
 	os << "\nResize buffers: ";
 
-	GetPrivateProfileString("Display", "ResizeBuffersDisable", "false", buf, sizeof(buf), INI_FILE);
-	value = ToLowerStr(buf);
-	if (value == "true") {
-		ResizeBuffersDisable = true;
+	ResizeBuffersDisable = reader.GetBoolean("DisplayTweaks", "ResizeBuffersDisable", false);
+	if (ResizeBuffersDisable) {
 		os << "enabled";
 	}
 	else {
-		ResizeBuffersDisable = false;
 		os << "disabled";
 	}
 
 	os << "\nResize target: ";
 
-	GetPrivateProfileString("Display", "ResizeTargetDisable", "false", buf, sizeof(buf), INI_FILE);
-	value = ToLowerStr(buf);
-	if (value == "true") {
-		ResizeTargetDisable = true;
+	ResizeTargetDisable = reader.GetBoolean("DisplayTweaks", "ResizeTargetDisable", false);
+	if (ResizeTargetDisable) {
 		os << "enabled";
 	}
 	else {
-		ResizeTargetDisable = false;
 		os << "disabled";
 	}
 	
 	os << "\nDXGI swap effect: ";
 
-	DXGISwapEffect = GetPrivateProfileIntA("Display", "SwapEffect", 0, INI_FILE);
+	DXGISwapEffect = reader.GetInteger("DisplayTweaks", "SwapEffect", 0);
 	if (DXGISwapEffect == 0) {
 		os << "auto";
 	}
@@ -194,20 +295,17 @@ void getinisettings() {
 
 	os << "\nAllow tearing: ";
 
-	GetPrivateProfileString("Display", "AllowTearing", "true", buf, sizeof(buf), INI_FILE);
-	value = ToLowerStr(buf);
-	if (value == "true") {
-		Tearing = true;
+	Tearing = reader.GetBoolean("DisplayTweaks", "AllowTearing", true);
+	if (Tearing) {
 		os << "enabled";
 	}
 	else {
-		Tearing = false;
 		os << "disabled";
 	}
 
 	os << "\nDXGI mode scalling: ";
 
-	ScalingMode = GetPrivateProfileIntA("Display", "ScalingMode", 0, INI_FILE);
+	ScalingMode = reader.GetInteger("DisplayTweaks", "ScalingMode", 0);
 	if (ScalingMode == 1) {
 		os << "unspecified";
 	}
@@ -218,293 +316,120 @@ void getinisettings() {
 		os << "stretched";
 	}
 
-	os << "\nProcessWindowGhosting: ";
-
-	//Ghosting
-	GetPrivateProfileString("Display", "DisableProcessWindowsGhosting", "true", buf, sizeof(buf), INI_FILE);
-	value = ToLowerStr(buf);
-	if (value == "true") {
-		DisableProcessWindowsGhosting();
-		os << "enabled";
-	}
-	else {
-		os << "disabled";
-	}
-
-	os << "\nUntie game speed from framerate: ";
-
-	//Fix game speed
-	GetPrivateProfileString("Main", "UntieSpeedFromFPS", "true", buf, sizeof(buf), INI_FILE);
-	value = ToLowerStr(buf);
-	if (value == "true") {
-		UntieSpeedFromFPS = true;
-		os << "enabled";
-	}
-	else {
-		UntieSpeedFromFPS = false;
-		os << "disabled";
-	}
-
-	os << "\nDisable iFPSClamp: ";
-
-	//Disable iFPSClamp
-	GetPrivateProfileString("Main", "DisableiFPSClamp", "true", buf, sizeof(buf), INI_FILE);
-	value = ToLowerStr(buf);
-	if (value == "true") {
-		DisableiFPSClamp = true;
-		os << "enabled";
-	}
-	else {
-		DisableiFPSClamp = false;
-		os << "disabled";
-	}
-
-	//Limiters
-
-	float ingamefps = GetPrivateProfileFloat("Limiter", "InGameFPS", 0, INI_FILE);
-	os << "\nLimit(ingame): ";
-	if (ingamefps > 0) {
-		limitgame = true;
-		limit = true;
-		fpslimitgame = 1.0 / ingamefps;
-		os << ingamefps << "FPS / " << fpslimitgame * 1000.0 << "ms";
-	}
-	else {
-		os << "disabled, ";
-	}
-
-	float loadscreenfps = GetPrivateProfileFloat("Limiter", "LoadingScreenFPS", 0, INI_FILE);
-	os << " Limit(loading): ";
-	if (accelerateLoading) {
-		if (loadscreenfps > 0) {
-			limitload = true;
-			limit = true;
-			fpslimitload = 1.0 / loadscreenfps;
-			os << loadscreenfps << "FPS / " << fpslimitload * 1000.0 << "ms";
-		}
-		else {
-			os << "disabled";
-		}
-	}
-	else os << "disabled";
-
-	//Fix mouse sensitivity during lockpicking
-	float LockpickingFPS = GetPrivateProfileFloat("Limiter", "LockpickingFPS", 0, INI_FILE);
-	os << "\nLimit lockpicking: ";
-	if (LockpickingFPS > 0) {
-		FixLockpickingSound = true;
-		limit = true;
-		fpslockpicking = 1.0 / LockpickingFPS;
-		os << LockpickingFPS << "FPS / " << fpslockpicking * 1000.0 << "ms";
-	}
-	else {
-		FixLockpickingSound = false;
-		os << "disabled";
-	}
-
-	//Limit threads on loading screens (starting a new game)
-	NumOfThreadsWhileLoadingNewGame = GetPrivateProfileIntA("Limiter", "NumOfThreadsWhileLoadingNewGame", 1, INI_FILE);
-	os << "\nNum of threads on loading screens (new game): ";
-	if (NumOfThreadsWhileLoadingNewGame > 0) {
-		os << NumOfThreadsWhileLoadingNewGame;
-		LimitCPUThreadsNG = true;
-	}
-	else {
-		LimitCPUThreadsNG = false;
-		os << "default";
-	}
-
-	os << "\nLoading screens: ";
-
-	//Loading screen with 3D model
-	GetPrivateProfileString("Limiter", "DisableBlackLoadingScreens", "false", buf, sizeof(buf), INI_FILE);
-	value = ToLowerStr(buf);
-	if (value == "true") {
-		DisableBlackLoadingScreens = true;
-		os << "without black screens";
-	}
-	else {
-		DisableBlackLoadingScreens = false;
-		os << "default";
-	}
-
-	os << "\nDisable animation on loading screens: ";
-
-	//Disable loading screens
-	GetPrivateProfileString("Limiter", "DisableAnimationOnLoadingScreens", "false", buf, sizeof(buf), INI_FILE);
-	value = ToLowerStr(buf);
-	if (value == "true") {
-		DisableAnimationOnLoadingScreens = true;
-		os << "enabled";
-	}
-	else {
-		DisableAnimationOnLoadingScreens = false;
-		os << "disabled";
-	}
-
-	os << "\nPostloading menu speed: ";
-
-	//Postloading menu speed
-	PostloadingMenuSpeed = GetPrivateProfileFloat("Limiter", "PostloadingMenuSpeed", 1, INI_FILE);
-	if (PostloadingMenuSpeed != 1) {
-		os << PostloadingMenuSpeed;
-		ReduceAfterLoading = true;
-	}
-	else {
-		ReduceAfterLoading = false;
-		os << "default";
-	}
-
 	os << "\nFix CPU threads: ";
 
 	//Fix CPU threads
-	GetPrivateProfileString("Fixes", "FixCPUThreads", "true", buf, sizeof(buf), INI_FILE);
-	value = ToLowerStr(buf);
-	if (value == "true") {
-		FixCPUThreads = true;
+	FixCPUThreads = reader.GetBoolean("Fixes", "FixCPUThreads", true);
+	
+	if (FixCPUThreads) {
 		os << "enabled";
 	}
 	else {
-		FixCPUThreads = false;
 		os << "disabled";
 	}
 
 	os << "\nWrite loading time to log: ";
 
 	//Write loading time to log
-	GetPrivateProfileString("Fixes", "WriteLoadingTime", "false", buf, sizeof(buf), INI_FILE);
-	value = ToLowerStr(buf);
-	if (value == "true") {
+	WriteLoadingTime = reader.GetBoolean("Fixes", "WriteLoadingTime", false);	
+	if (WriteLoadingTime) {
 		os << "enabled";
-		WriteLoadingTime = true;
 	}
 	else {
-		WriteLoadingTime = false;
 		os << "disabled";
 	}
 
 	os << "\nFix stuttering: ";
 
 	//Fix game stuttering
-	GetPrivateProfileString("Fixes", "FixStuttering", "true", buf, sizeof(buf), INI_FILE);
-	value = ToLowerStr(buf);
-	if (value == "true") {
-		FixStuttering = true;
+	FixStuttering = reader.GetBoolean("Fixes", "FixStuttering", true);
+	if (FixStuttering) {
 		os << "enabled";
 	}
 	else {
-		FixStuttering = false;
 		os << "disabled";
 	}
 
 	os << "\nFix white screen: ";
 
 	//Fix white screen
-	GetPrivateProfileString("Fixes", "FixWhiteScreen", "true", buf, sizeof(buf), INI_FILE);
-	value = ToLowerStr(buf);
-	if (value == "true") {
-		FixWhiteScreen = true;
+	FixWhiteScreen = reader.GetBoolean("Fixes", "FixWhiteScreen", true);
+	if (FixWhiteScreen) {
 		os << "enabled";
 	}
 	else {
-		FixWhiteScreen = false;
 		os << "disabled";
 	}
 
 	os << "\nFix wind speed: ";
 
 	//Fix wind speed
-	GetPrivateProfileString("Fixes", "FixWindSpeed", "true", buf, sizeof(buf), INI_FILE);
-	value = ToLowerStr(buf);
-	if (value == "true") {
-		FixWindSpeed = true;
+	FixWindSpeed = reader.GetBoolean("Fixes", "FixWindSpeed", true);	
+	if (FixWindSpeed) {
 		os << "enabled";
 	}
 	else {
-		FixWindSpeed = false;
 		os << "disabled";
 	}
 
 	os << "\nFix rotation speed: ";
 
-	//Fix rotation speed
-	GetPrivateProfileString("Fixes", "FixRotationSpeed", "true", buf, sizeof(buf), INI_FILE);
-	value = ToLowerStr(buf);
-	if (value == "true") {
-		FixRotationSpeed = true;
+	FixRotationSpeed = reader.GetBoolean("Fixes", "FixRotationSpeed", true);
+	
+	if (FixRotationSpeed) {
 		os << "enabled";
 	}
 	else {
-		FixRotationSpeed = false;
 		os << "disabled";
 	}
 
 	os << "\nFix sitting rotation speed: ";
 
-	//Fix rotation speed
-	GetPrivateProfileString("Fixes", "FixSittingRotationSpeed", "true", buf, sizeof(buf), INI_FILE);
-	value = ToLowerStr(buf);
-	if (value == "true") {
-		FixSittingRotationSpeed = true;
+	FixSittingRotationSpeed = reader.GetBoolean("Fixes", "FixSittingRotationSpeed", true);	
+	if (FixSittingRotationSpeed) {
 		os << "enabled";
 	}
 	else {
-		FixSittingRotationSpeed = false;
 		os << "disabled";
 	}
 
 	os << "\nFix workshop rotation speed: ";
 
-	//Fix workshop rotation speed
-	GetPrivateProfileString("Fixes", "FixWorkshopRotationSpeed", "true", buf, sizeof(buf), INI_FILE);
-	value = ToLowerStr(buf);
-	if (value == "true") {
-		FixWorkshopRotationSpeed = true;
+	FixWorkshopRotationSpeed = reader.GetBoolean("Fixes", "FixWorkshopRotationSpeed", true);
+	if (FixWorkshopRotationSpeed) {
 		os << "enabled";
 	}
 	else {
-		FixWorkshopRotationSpeed = false;
 		os << "disabled";
 	}
 
 	os << "\nFix loading model: ";
 
-	//Fix workshop rotation speed
-	GetPrivateProfileString("Fixes", "FixLoadingModel", "true", buf, sizeof(buf), INI_FILE);
-	value = ToLowerStr(buf);
-	if (value == "true") {
-		FixLoadingModel = true;
+	FixLoadingModel = reader.GetBoolean("Fixes", "FixLoadingModel", true);	
+	if (FixLoadingModel) {
 		os << "enabled";
 	}
 	else {
-		FixLoadingModel = false;
 		os << "disabled";
 	}
 
 	os << "\nFix stuck animation: ";
 
-	//Fix stuck animation
-	GetPrivateProfileString("Fixes", "FixStuckAnimation", "true", buf, sizeof(buf), INI_FILE);
-	value = ToLowerStr(buf);
-	if (value == "true") {
-		FixStuckAnimation = true;
+	FixStuckAnimation = reader.GetBoolean("Fixes", "FixStuckAnimation", true);	
+	if (FixStuckAnimation) {
 		os << "enabled";
 	}
 	else {
-		FixStuckAnimation = false;
 		os << "disabled";
 	}
 
 	os << "\nFix motion responsive: ";
 
-	GetPrivateProfileString("Fixes", "FixMotionResponsive", "true", buf, sizeof(buf), INI_FILE);
-	value = ToLowerStr(buf);
-	if (value == "true") {
-		FixMotionResponsive = true;
+	FixMotionResponsive = reader.GetBoolean("Fixes", "FixMotionResponsive", true);	
+	if (FixMotionResponsive) {
 		os << "enabled\n";
 	}
 	else {
-		FixMotionResponsive = false;
 		os << "disabled\n";
 	}
 	_MESSAGE(os.str().c_str());
@@ -515,7 +440,6 @@ void GetNumberOfThreads() {
 	SYSTEM_INFO SystemInfo;
 	GetSystemInfo(&SystemInfo);
 	nMaxProcessorAfterLoad = (1 << SystemInfo.dwNumberOfProcessors) - 1;
-	f4handle = GetCurrentProcess();
 }
 
 void SetThreadsNewGame(void* unk1, void* unk2, void* unk3, void* unk4) {
@@ -547,8 +471,6 @@ void HookFPS() {
 		SafeWriteBuf(RelocAddr<uintptr_t>(0x12446E7).GetUIntPtr(), "\xE9\x60\x2F\x00\x00", 5);
 	}
 }
-
-clock_t start, end;
 
 //Detect loading screen and lockpicking menu
 EventResult	MenuOpenCloseHandler::ReceiveEvent(MenuOpenCloseEvent* evn, void* dispatcher)
@@ -676,9 +598,45 @@ void RegisterHooks() {
 	loadingFPSmax = static_cast<long long>(fpslimitload * 1000000.0);
 }
 
+DWORD_PTR GetProcessBaseAddress(DWORD processID) {
+	DWORD_PTR   baseAddress = 0;
+	HANDLE      processHandle = OpenProcess(PROCESS_ALL_ACCESS, FALSE, processID);
+	HMODULE* moduleArray;
+	LPBYTE      moduleArrayBytes;
+	DWORD       bytesRequired;
+
+	if (processHandle) {
+		if (EnumProcessModules(processHandle, NULL, 0, &bytesRequired)) {
+			if (bytesRequired) {
+				moduleArrayBytes = (LPBYTE)LocalAlloc(LPTR, bytesRequired);
+				if (moduleArrayBytes) {
+					unsigned int moduleCount;
+					moduleCount = bytesRequired / sizeof(HMODULE);
+					moduleArray = (HMODULE*)moduleArrayBytes;
+					if (EnumProcessModules(processHandle, moduleArray, bytesRequired, &bytesRequired)) {
+						baseAddress = (DWORD_PTR)moduleArray[0];
+					}
+					LocalFree(moduleArrayBytes);
+				}
+			}
+		}
+		CloseHandle(processHandle);
+	}
+	return baseAddress;
+}
+
+void GetProcess() {
+	DWORD procId = GetCurrentProcessId();
+	_MESSAGE("Process ID: %d", procId);
+	DWORD_PTR baseadd = GetProcessBaseAddress(procId);
+	f4handle = OpenProcess(PROCESS_ALL_ACCESS, FALSE, procId);
+	FSAddress = baseadd + 0x384FC58;
+}
+
 void PatchGame() {
 	if (FixCPUThreads) {
-		SafeWriteBuf(FixCPUThreadsAddress.GetUIntPtr(), "\xEB\x14", 2); //74 14
+		SafeWriteBuf(FixCPUThreadsAddress1.GetUIntPtr(), "\xEB\x14", 2); //74 14
+		SafeWriteBuf(FixCPUThreadsAddress2.GetUIntPtr(), "\xE9\x84\x00\x00\x00\x90", 6); //0F 84 83 00 00 00
 	}
 	if (UntieSpeedFromFPS) {
 		unsigned char data1[] = { 0xBA, 0x00, 0x00, 0x00, 0x00 };
@@ -773,7 +731,6 @@ void PatchGame() {
 		unsigned char fPickMouseRotationSpeed[] = { 0x96, 0x43, 0x8B, 0x3C, 0x00 }; //0.017
 		SafeWriteBuf(RelocAddr<uintptr_t>(0x2C1674A).GetUIntPtr(), fPickMouseRotationSpeed, sizeof(fPickMouseRotationSpeed));
 	}
-	//Disable animation on loading screens
 	if (DisableAnimationOnLoadingScreens) {
 		unsigned char data20[] = { 0x90, 0x90, 0x90, 0x90 };
 		SafeWriteBuf(RelocAddr<uintptr_t>(0xCBFFCD).GetUIntPtr(), &data20, sizeof(data20));
@@ -797,6 +754,15 @@ void PatchGame() {
 		SafeWriteBuf(RelocAddr<uintptr_t>(0x2844EB).GetUIntPtr(), "\xE9\xAC\x00\x00\x00\x0F\x2F\xC1\x90\x90\x90\x90", 12);
 		SafeWriteBuf(RelocAddr<uintptr_t>(0x28459C).GetUIntPtr(), "\xF3\x0F\x10\x45\x40\xF3\x0F\x10\x0D\x4C\x00\x00\x00\xF3\x0F\x59\xCE\xEB\x05\xCC\xC2\x00\x00\xCC\xE9\x37\xFF\xFF\xFF", 29);
 	}
+	GetProcess();
+	//GetProcId();
+	ReadProcessMemory(f4handle, (PVOID*)FSAddress, &FullScr, sizeof(FullScr), 0);
+	if (FullScr == 1) {
+		_MESSAGE("Full screen");
+	}
+	if (FullScr == 0) {
+	_MESSAGE("Windowed");
+	}
 }
 
 void onF4SEMessage(F4SEMessagingInterface::Message* msg) {
@@ -810,6 +776,7 @@ void onF4SEMessage(F4SEMessagingInterface::Message* msg) {
 			if (LimitCPUThreadsNG) {
 				_MESSAGE("Getting the number of processor threads...");
 				GetNumberOfThreads();
+				_MESSAGE("Getting the number of processor threads OK");
 				LimitCPUNewGame();
 				ReturnThreads();
 			}
@@ -882,17 +849,24 @@ extern "C"
 			_ERROR("couldn't create codegen buffer. this is fatal. skipping remainder of init process.");
 			return false;
 		}
+
 		getinisettings();
-		PatchDisplay();
-		Hook();
+
+		if (EnableDisplayTweaks) {
+			PatchDisplay();
+			Hook();
+		}
+
 		//Disable bethesda auto Vsync and FPS cap
 		SafeWriteBuf(BethesdaVsyncAddress.GetUIntPtr(), "\x90\x90\x90\x90", 4);
 		uint32_t maxrefreshrate = 10000;
 		SafeWriteBuf(BethesdaFPSCap1Address.GetUIntPtr(), &maxrefreshrate, sizeof(maxrefreshrate));
 		SafeWriteBuf(BethesdaFPSCap2Address.GetUIntPtr(), &maxrefreshrate, sizeof(maxrefreshrate));
+
 		if (Vsync) {
 			SafeWriteBuf(VsyncAddress.GetUIntPtr(), &PresentInterval1, sizeof(PresentInterval1));
 		}
+
 		g_messaging->RegisterListener(g_pluginHandle, "F4SE", onF4SEMessage);
 		return true;
 	}

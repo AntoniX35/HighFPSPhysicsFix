@@ -1,10 +1,8 @@
-#include "HighFPSPhysicsFix.h"
 #include "f4se/Hooks_Scaleform.cpp"
 #include "f4se_common/SafeWrite.h"
 #include "f4se_common/BranchTrampoline.h"
 #include "f4se/GameSettings.h"
 #include "xbyak/xbyak.h"
-#include "config.h"
 #include <shlobj.h>
 #include <stdio.h>
 #include <string>
@@ -28,3 +26,5 @@
 #include <functional>
 #include "JITASM.h"
 #include <wrl/client.h>
+#include "config.h"
+#include "HighFPSPhysicsFix.h"
