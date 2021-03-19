@@ -136,6 +136,23 @@ const char* GetSwapEffectOption(DXGI_SWAP_EFFECT a_swapEffect)
     }
 }
 
+bool ValidateDisplayMode(const DXGI_SWAP_CHAIN_DESC* pSwapChainDesc) {
+    if (pSwapChainDesc->BufferDesc.RefreshRate.Numerator > 0 &&
+        !pSwapChainDesc->BufferDesc.RefreshRate.Denominator) {
+        return false;
+    }
+
+    return true;
+}
+
+UINT GetRefreshRate(const DXGI_SWAP_CHAIN_DESC* pSwapChainDesc) {
+    if (!pSwapChainDesc->BufferDesc.RefreshRate.Denominator) {
+        return 0U;
+    }
+    return pSwapChainDesc->BufferDesc.RefreshRate.Numerator /
+        pSwapChainDesc->BufferDesc.RefreshRate.Denominator;
+}
+
 void SetFPSLimitOverride() {
     if (Vsync) {
         if (Tearing) {
@@ -171,7 +188,6 @@ void PatchDisplay() {
     else {
         SafeWriteBuf(FullscreenAddress.GetUIntPtr(), "\xB8\x00\x00\x00\x00\x90\x90", 7);
     }
-
     if (!Fullscreen) {
         if (ResizeBuffersDisable) {
             _MESSAGE("Disabled swap chain buffer resizing");
@@ -285,34 +301,29 @@ DXGI_SWAP_EFFECT AutoGetSwapEffect(const DXGI_SWAP_CHAIN_DESC* pSwapChainDesc) {
 }
 
 DXGI_SWAP_EFFECT ManualGetSwapEffect(const DXGI_SWAP_CHAIN_DESC* pSwapChainDesc) {
-    DXGI_SWAP_EFFECT nse = DXGI_SWAP_EFFECT_DISCARD;
-    DXGI_SWAP_EFFECT se = DXGI_SWAP_EFFECT_DISCARD;
+    auto se = DXGI_SWAP_EFFECT_DISCARD;
     if (DXGISwapEffect == 1) {
-        DXGI_SWAP_EFFECT se = DXGI_SWAP_EFFECT_DISCARD;
+       se = DXGI_SWAP_EFFECT_DISCARD;
     }
     if (DXGISwapEffect == 2) {
-        DXGI_SWAP_EFFECT se = DXGI_SWAP_EFFECT_SEQUENTIAL;
+        se = DXGI_SWAP_EFFECT_SEQUENTIAL;
     }
     if (DXGISwapEffect == 3) {
-        DXGI_SWAP_EFFECT se = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+        se = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
     }
     if (DXGISwapEffect == 4) {
-        DXGI_SWAP_EFFECT se = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+        se = DXGI_SWAP_EFFECT_FLIP_DISCARD;
     }
     if (pSwapChainDesc->Windowed == TRUE) {
         auto nse = se;
         if (nse == DXGI_SWAP_EFFECT_FLIP_DISCARD &&
-            !(dxgi.caps & DXGI_CAP_FLIP_DISCARD))
-        {
+            !(dxgi.caps & DXGI_CAP_FLIP_DISCARD)) {
             nse = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
         }
-
         if (nse == DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL &&
-            !(dxgi.caps & DXGI_CAP_FLIP_SEQUENTIAL))
-        {
+            !(dxgi.caps & DXGI_CAP_FLIP_SEQUENTIAL)) {
             nse = DXGI_SWAP_EFFECT_DISCARD;
         }
-
         if (nse != se) {
             _MESSAGE("%s not supported, using %s", GetSwapEffectOption(se), GetSwapEffectOption(nse));
             se = nse;
@@ -320,7 +331,6 @@ DXGI_SWAP_EFFECT ManualGetSwapEffect(const DXGI_SWAP_CHAIN_DESC* pSwapChainDesc)
     }
     return se;
 }
-
 
 void DXGI_GetCapabilities() {
     bool release;
@@ -465,11 +475,49 @@ void ApplyD3DSettings(DXGI_SWAP_CHAIN_DESC* pSwapChainDesc)
     swapchain.flags = pSwapChainDesc->Flags;
 }
 
+bool HasWindowedHWCompositionSupport(IDXGIAdapter* adapter) {
+    if (adapter == nullptr) {
+        return false;
+    }
+
+    for (UINT i = 0;; ++i) {
+        Microsoft::WRL::ComPtr<IDXGIOutput> output;
+        if (FAILED(adapter->EnumOutputs(i, &output))) {
+            break;
+        }
+
+        Microsoft::WRL::ComPtr<IDXGIOutput6> output6;
+        if (SUCCEEDED(output.As(&output6))) {
+            UINT flags;
+            HRESULT hr = output6->CheckHardwareCompositionSupport(&flags);
+
+            if (SUCCEEDED(hr) && (flags & DXGI_HARDWARE_COMPOSITION_SUPPORT_FLAG_WINDOWED)) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
 void OnD3D11PreCreate(IDXGIAdapter* pAdapter, const DXGI_SWAP_CHAIN_DESC* pSwapChainDesc) {
+    if (!ValidateDisplayMode(pSwapChainDesc)) {
+        _MESSAGE("Invalid refresh rate: (%u/%u)",
+            pSwapChainDesc->BufferDesc.RefreshRate.Numerator,
+            pSwapChainDesc->BufferDesc.RefreshRate.Denominator);
+    }
+
     ApplyD3DSettings(const_cast<DXGI_SWAP_CHAIN_DESC*>(pSwapChainDesc));
+
+    _MESSAGE("[D3D11] Requesting mode: %ux%u@%u | VSync: %u | Windowed: %d",
+        pSwapChainDesc->BufferDesc.Width, pSwapChainDesc->BufferDesc.Height,
+        GetRefreshRate(pSwapChainDesc), Vsync, pSwapChainDesc->Windowed);
 
     _MESSAGE("[D3D11] Swap effect: %s | Buffer count: %u | Flags: 0x%.8X",
         GetSwapEffectOption(pSwapChainDesc->SwapEffect), pSwapChainDesc->BufferCount, pSwapChainDesc->Flags);
+
+    _MESSAGE("[D3D11] Windowed hardware composition support: %s",
+        HasWindowedHWCompositionSupport(pAdapter) ? "yes" : "no");
 
     if (pSwapChainDesc->Windowed == TRUE) {
         if (!IsFlipOn(pSwapChainDesc)) {
@@ -486,9 +534,6 @@ void OnD3D11PreCreate(IDXGIAdapter* pAdapter, const DXGI_SWAP_CHAIN_DESC* pSwapC
             _MESSAGE("Using flip in exclusive fullscreen may cause issues");
         }
     }
-}
-
-void OnD3D11PostCreate(const DXGI_SWAP_CHAIN_DESC* pSwapChainDesc, ID3D11Device** ppDevice) {
 }
 
 HRESULT WINAPI D3D11CreateDeviceAndSwapChain_Hook(
@@ -516,19 +561,18 @@ HRESULT WINAPI D3D11CreateDeviceAndSwapChain_Hook(
         pSwapChainDesc, ppSwapChain, ppDevice, pFeatureLevel,
         ppImmediateContext);
     if (hr == S_OK) {
-        OnD3D11PostCreate(pSwapChainDesc, ppDevice);
+        //OnD3D11PostCreate(pSwapChainDesc, ppDevice);
     }
     else {
         _MESSAGE("D3D11CreateDeviceAndSwapChain failed: 0x%lX", hr);
     }
-
     return hr;
 }
 
 HRESULT WINAPI CreateDXGIFactory_Hook(REFIID riid, _COM_Outptr_ void** ppFactory) {
     HRESULT hr = CreateDXGIFactory_O(riid, ppFactory);
     if (SUCCEEDED(hr)) {
-        pFactory = reinterpret_cast<IDXGIFactory*>(*ppFactory);
+        pFactory = static_cast<IDXGIFactory*>(*ppFactory);
     }
     else {
         _MESSAGE("CreateDXGIFactory failed (%lX)", hr);

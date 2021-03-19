@@ -235,7 +235,6 @@ void getinisettings() {
 	else {
 		os << "disabled";
 	}
-
 	os << "\nNumber of buffers in the swap chain: ";
 
 	SwapBufferCount = reader.GetInteger("DisplayTweaks", "BufferCount", 0);
@@ -755,7 +754,6 @@ void PatchGame() {
 		SafeWriteBuf(RelocAddr<uintptr_t>(0x28459C).GetUIntPtr(), "\xF3\x0F\x10\x45\x40\xF3\x0F\x10\x0D\x4C\x00\x00\x00\xF3\x0F\x59\xCE\xEB\x05\xCC\xC2\x00\x00\xCC\xE9\x37\xFF\xFF\xFF", 29);
 	}
 	GetProcess();
-	//GetProcId();
 	ReadProcessMemory(f4handle, (PVOID*)FSAddress, &FullScr, sizeof(FullScr), 0);
 	if (FullScr == 1) {
 		_MESSAGE("Full screen");
@@ -857,7 +855,7 @@ extern "C"
 			Hook();
 		}
 
-		//Disable bethesda auto Vsync and FPS cap
+		//Disable Bethesda auto Vsync and FPS cap
 		SafeWriteBuf(BethesdaVsyncAddress.GetUIntPtr(), "\x90\x90\x90\x90", 4);
 		uint32_t maxrefreshrate = 10000;
 		SafeWriteBuf(BethesdaFPSCap1Address.GetUIntPtr(), &maxrefreshrate, sizeof(maxrefreshrate));
