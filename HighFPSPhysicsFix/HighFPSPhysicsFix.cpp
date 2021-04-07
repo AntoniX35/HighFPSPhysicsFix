@@ -10,18 +10,20 @@ RelocAddr<uintptr_t> FPSLimiter(0x1D0B67E);
 RelocAddr<uintptr_t> PostloadingMenuSpeedAddress(0x126DAEB);
 RelocAddr<uintptr_t> SittingRotationSpeedXAddress(0x3804738);
 RelocAddr<uintptr_t> SittingRotationSpeedYAddress(0x3804750);
-RelocAddr<uintptr_t> FixCPUThreadsAddress1(0xE9B7E1);
-RelocAddr<uintptr_t> FixCPUThreadsAddress2(0xD69DCF);
 RelocAddr<uintptr_t> BethesdaVsyncAddress(0x1D17792);
 RelocAddr<uintptr_t> BethesdaFPSCap1Address(0xD423BA);
 RelocAddr<uintptr_t> BethesdaFPSCap2Address(0xD423C3);
 RelocAddr<uintptr_t> VsyncAddress(0x61E0950);
+RelocAddr<uintptr_t> FrametimeAddress(0x5A66FE8);    
+RelocAddr<uintptr_t> MotionFeedBackAddress(0x2845F5);
+RelocAddr<uintptr_t> DefaultValueAddress(0x2C97370); //0.0166666666666666
+RelocAddr<uintptr_t> FPS60ValueAddress(0x2C1674A);   //0.017
+RelocAddr<uintptr_t> PanSpeedAddress(0x3808270);
 
 long long CurrentFPS, FPSui, loadingFPSmax, lockpickingFPSmax, timing;
-__int64	FSAddress;
 bool limit = false;
 float fpslimitgame, fpslimitload, fpslockpicking, SittingRotSpeedX, SittingRotSpeedY, PostloadingMenuSpeed;
-int isLockpicking, NumOfThreadsWhileLoading, NumOfThreadsWhileLoadingNewGame, fpslimit, isLimiting, SwapBufferCount, DXGISwapEffect, ScalingMode, FullScr;
+int isLockpicking, NumOfThreadsWhileLoading, NumOfThreadsWhileLoadingNewGame, fpslimit, SwapBufferCount, DXGISwapEffect, ScalingMode;
 unsigned int nMaxProcessorMask;
 unsigned int nMaxProcessorMaskNG;
 unsigned int nMaxProcessorAfterLoad;
@@ -130,6 +132,17 @@ void getinisettings() {
 		os << "disabled";
 	}
 
+	os << "\nWrite loading time to log: ";
+
+	//Write loading time to log
+	WriteLoadingTime = reader.GetBoolean("Main", "WriteLoadingTime", false);
+	if (WriteLoadingTime) {
+		os << "enabled";
+	}
+	else {
+		os << "disabled";
+	}
+
 	os << "\nPostloading menu speed: ";
 
 	PostloadingMenuSpeed = reader.GetReal("Main", "PostloadingMenuSpeed", 1);
@@ -219,7 +232,7 @@ void getinisettings() {
 	os << "\nFull screen: ";
 
 	Fullscreen = reader.GetBoolean("DisplayTweaks", "FullScreen", false);
-	if (value == "true") {
+	if (Fullscreen) {
 		os << "enabled";
 	}
 	else {
@@ -321,17 +334,6 @@ void getinisettings() {
 	FixCPUThreads = reader.GetBoolean("Fixes", "FixCPUThreads", true);
 	
 	if (FixCPUThreads) {
-		os << "enabled";
-	}
-	else {
-		os << "disabled";
-	}
-
-	os << "\nWrite loading time to log: ";
-
-	//Write loading time to log
-	WriteLoadingTime = reader.GetBoolean("Fixes", "WriteLoadingTime", false);	
-	if (WriteLoadingTime) {
 		os << "enabled";
 	}
 	else {
@@ -463,11 +465,55 @@ void HookFPS() {
 		SafeWriteBuf(SittingRotationSpeedXAddress.GetUIntPtr(), &SittingRotSpeedX, sizeof(float));
 		SafeWriteBuf(SittingRotationSpeedYAddress.GetUIntPtr(), &SittingRotSpeedY, sizeof(float));
 		//x
-		SafeWriteBuf(RelocAddr<uintptr_t>(0x124603D).GetUIntPtr(), "\xF3\x0F\x59\x05\x8F\x56\x91\x04\xF3\x0F\x59\x40\x4C\xE9\x86\xE6\xFF\xFF", 18);
-		SafeWriteBuf(RelocAddr<uintptr_t>(0x12446D0).GetUIntPtr(), "\xE9\x68\x19\x00\x00", 5);
+		{
+			struct Patch1_Code : Xbyak::CodeGenerator {
+				Patch1_Code(void* buf, uintptr_t a_hookTarget, uintptr_t a_frameTimer) : Xbyak::CodeGenerator(4096, buf) {
+					Xbyak::Label retnLabel;
+					Xbyak::Label timerLabel;
+
+					mov(r9, ptr[rip + timerLabel]);
+					mulss(xmm0, dword[r9]);
+					mulss(xmm0, ptr[rax + 0x4C]);
+
+					jmp(ptr[rip + retnLabel]);
+
+					L(retnLabel);
+					dq(a_hookTarget + 0x5);
+
+					L(timerLabel);
+					dq(a_frameTimer);
+				}
+			};
+			void* codeBuf1 = g_localTrampoline.StartAlloc();
+			Patch1_Code code1(codeBuf1, RelocAddr<uintptr_t>(0x12446D0).GetUIntPtr(), FrametimeAddress);
+			g_localTrampoline.EndAlloc(code1.getCurr());
+			g_branchTrampoline.Write5Branch(RelocAddr<uintptr_t>(0x12446D0).GetUIntPtr(), uintptr_t(code1.getCode()));
+		}
 		//y
-		SafeWriteBuf(RelocAddr<uintptr_t>(0x124764C).GetUIntPtr(), "\xF3\x0F\x59\x0D\x80\x40\x91\x04\xF3\x0F\x10\x43\x64\xE9\x8E\xD0\xFF\xFF", 18);
-		SafeWriteBuf(RelocAddr<uintptr_t>(0x12446E7).GetUIntPtr(), "\xE9\x60\x2F\x00\x00", 5);
+		{
+			struct Patch2_Code : Xbyak::CodeGenerator {
+				Patch2_Code(void* buf, uintptr_t a_hookTarget, uintptr_t a_frameTimer) : Xbyak::CodeGenerator(4096, buf) {
+					Xbyak::Label retnLabel;
+					Xbyak::Label timerLabel;
+
+					mov(r9, ptr[rip + timerLabel]);
+					mulss(xmm1, dword[r9]);
+					movss(xmm0, ptr[rbx + 0x64]);
+
+					jmp(ptr[rip + retnLabel]);
+
+					L(retnLabel);
+					dq(a_hookTarget + 0x5);
+
+					L(timerLabel);
+					dq(a_frameTimer);
+				}
+			};
+			void* codeBuf2 = g_localTrampoline.StartAlloc();
+			Patch2_Code code2(codeBuf2, RelocAddr<uintptr_t>(0x12446E7).GetUIntPtr(), FrametimeAddress);
+			g_localTrampoline.EndAlloc(code2.getCurr());
+			g_branchTrampoline.Write5Branch(RelocAddr<uintptr_t>(0x12446E7).GetUIntPtr(), uintptr_t(code2.getCode()));
+		}
 	}
 }
 
@@ -502,10 +548,6 @@ EventResult	MenuOpenCloseHandler::ReceiveEvent(MenuOpenCloseEvent* evn, void* di
 			if (WriteLoadingTime) {
 				end = clock();
 				_MESSAGE("Loading time: %.2f second(s)", ((double)end - start) / ((double)CLOCKS_PER_SEC));
-			}
-			if (isLimiting == 1) {
-				SetProcessAffinityMask(f4handle, nMaxProcessorAfterLoad);
-				isLimiting = 0;
 			}
 		}
 	}
@@ -597,169 +639,614 @@ void RegisterHooks() {
 	loadingFPSmax = static_cast<long long>(fpslimitload * 1000000.0);
 }
 
-DWORD_PTR GetProcessBaseAddress(DWORD processID) {
-	DWORD_PTR   baseAddress = 0;
-	HANDLE      processHandle = OpenProcess(PROCESS_ALL_ACCESS, FALSE, processID);
-	HMODULE* moduleArray;
-	LPBYTE      moduleArrayBytes;
-	DWORD       bytesRequired;
-
-	if (processHandle) {
-		if (EnumProcessModules(processHandle, NULL, 0, &bytesRequired)) {
-			if (bytesRequired) {
-				moduleArrayBytes = (LPBYTE)LocalAlloc(LPTR, bytesRequired);
-				if (moduleArrayBytes) {
-					unsigned int moduleCount;
-					moduleCount = bytesRequired / sizeof(HMODULE);
-					moduleArray = (HMODULE*)moduleArrayBytes;
-					if (EnumProcessModules(processHandle, moduleArray, bytesRequired, &bytesRequired)) {
-						baseAddress = (DWORD_PTR)moduleArray[0];
-					}
-					LocalFree(moduleArrayBytes);
-				}
-			}
-		}
-		CloseHandle(processHandle);
-	}
-	return baseAddress;
-}
-
 void GetProcess() {
 	DWORD procId = GetCurrentProcessId();
-	_MESSAGE("Process ID: %d", procId);
-	DWORD_PTR baseadd = GetProcessBaseAddress(procId);
 	f4handle = OpenProcess(PROCESS_ALL_ACCESS, FALSE, procId);
-	FSAddress = baseadd + 0x384FC58;
 }
 
 void PatchGame() {
+	if (DisableAnimationOnLoadingScreens) {
+		SafeWriteBuf(RelocAddr<uintptr_t>(0xCBFFCD).GetUIntPtr(), "\x90\x90\x90\x90", 4);
+	}
+	if (DisableBlackLoadingScreens) {
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x1297076).GetUIntPtr(), "\xEB", 1);
+	}
+	float DefaultFPSValue = 0.017;
+	SafeWriteBuf(FPS60ValueAddress.GetUIntPtr(), &DefaultFPSValue, sizeof(float));
 	if (FixCPUThreads) {
-		SafeWriteBuf(FixCPUThreadsAddress1.GetUIntPtr(), "\xEB\x14", 2); //74 14
-		SafeWriteBuf(FixCPUThreadsAddress2.GetUIntPtr(), "\xE9\x84\x00\x00\x00\x90", 6); //0F 84 83 00 00 00
+		SafeWriteBuf(RelocAddr<uintptr_t>(0xE9B7E1).GetUIntPtr(), "\xEB", 1); //je -> jmp
+		struct Patch_Code : Xbyak::CodeGenerator {
+			Patch_Code(void* buf, uintptr_t a_hookTarget) : Xbyak::CodeGenerator(4096, buf) {
+				Xbyak::Label retnLabel;
+
+				jmp(ptr[rip + retnLabel]);
+
+				L(retnLabel);
+				dq(a_hookTarget + 0x89);
+			}
+		};
+		void* codeBuf = g_localTrampoline.StartAlloc();
+		Patch_Code code(codeBuf, RelocAddr<uintptr_t>(0xD69DCF).GetUIntPtr());
+		g_localTrampoline.EndAlloc(code.getCurr());
+		g_branchTrampoline.Write6Branch(RelocAddr<uintptr_t>(0xD69DCF).GetUIntPtr(), uintptr_t(code.getCode()));
+		SafeWriteBuf(RelocAddr<uintptr_t>(0xD69DCF + 0x5).GetUIntPtr(), "\x90", 1);
 	}
 	if (UntieSpeedFromFPS) {
-		unsigned char data1[] = { 0xBA, 0x00, 0x00, 0x00, 0x00 };
-		SafeWriteBuf(RelocAddr<uintptr_t>(0x1B1393A).GetUIntPtr(), &data1, sizeof(data1));
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x1B1393B).GetUIntPtr(), "\x00", 1);
 	}
 	if (ReduceAfterLoading) {
 		SafeWriteBuf(PostloadingMenuSpeedAddress.GetUIntPtr(), &PostloadingMenuSpeed, sizeof(float));
-		SafeWriteBuf(RelocAddr<uintptr_t>(0x126D2DB).GetUIntPtr(), "\xF3\x0F\x10\x05\x08\x08\x00\x00\xF3\x0F\x59\x05\xE9\xE3\x8E\x04\xE9\x73\x04\x00\x00", 21);
-		SafeWriteBuf(RelocAddr<uintptr_t>(0x126D75B).GetUIntPtr(), "\xE9\x7B\xFB\xFF\xFF\x90\x90\x90", 8);
+		struct Patch_Code : Xbyak::CodeGenerator {
+			Patch_Code(void* buf, uintptr_t a_hookTarget, uintptr_t a_frameTimer, uintptr_t a_value) : Xbyak::CodeGenerator(4096, buf) {
+				Xbyak::Label retnLabel;
+				Xbyak::Label timerLabel;
+				Xbyak::Label valueLabel;
+
+				mov(r14, ptr[rip + valueLabel]);
+				movss(xmm0, dword[r14]);
+				mov(r14, ptr[rip + timerLabel]);
+				mulss(xmm0, dword[r14]);
+
+				jmp(ptr[rip + retnLabel]);
+
+				L(retnLabel);
+				dq(a_hookTarget + 0x8);
+
+				L(valueLabel);
+				dq(a_value);
+
+				L(timerLabel);
+				dq(a_frameTimer);
+			}
+		};
+		void* codeBuf = g_localTrampoline.StartAlloc();
+		Patch_Code code(codeBuf, RelocAddr<uintptr_t>(0x126D75B).GetUIntPtr(), FrametimeAddress, PostloadingMenuSpeedAddress);
+		g_localTrampoline.EndAlloc(code.getCurr());
+		g_branchTrampoline.Write5Branch(RelocAddr<uintptr_t>(0x126D75B).GetUIntPtr(), uintptr_t(code.getCode()));
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x126D75B + 0x5).GetUIntPtr(), "\x90\x90\x90", 3);
 	}
 	if (FixRotationSpeed) {
-		//objects
-		SafeWriteBuf(RelocAddr<uintptr_t>(0xF49645).GetUIntPtr(), "\xF3\x0F\x59\x15\x83\x20\xC1\x04", 8);
 		float ForwardRotationSpeed = 2.941176470588235;
 		float ReverseRotationSpeed = -2.941176470588235;
 		SafeWriteBuf(RelocAddr<uintptr_t>(0xF49664).GetUIntPtr(), &ForwardRotationSpeed, sizeof(float));
 		SafeWriteBuf(RelocAddr<uintptr_t>(0xF49668).GetUIntPtr(), &ReverseRotationSpeed, sizeof(float));
-		SafeWriteBuf(RelocAddr<uintptr_t>(0xF49623).GetUIntPtr(), "\xF3\x0F\x10\x15\x39\x00\x00\x00", 8);
-		SafeWriteBuf(RelocAddr<uintptr_t>(0xF4962D).GetUIntPtr(), "\xF3\x0F\x10\x15\x33\x00\x00\x00", 8);
-	}
-	if (FixWorkshopRotationSpeed) {
-		SafeWriteBuf(RelocAddr<uintptr_t>(0x2182B2).GetUIntPtr(), "\xF3\x0F\x59\x0D\x1A\x34\x94\x05", 8);
-	}
-	if (FixStuckAnimation) {
-		unsigned char s1[] = { 0x53 };
-		SafeWriteBuf(RelocAddr<uintptr_t>(0x24EC8BF).GetUIntPtr(), &s1, sizeof(s1));
-		unsigned char s2[] = { 0xF3, 0x0F, 0x10, 0x05, 0x82, 0x9E, 0x72, 0x00 };
-		SafeWriteBuf(RelocAddr<uintptr_t>(0x24EC8C0).GetUIntPtr(), &s2, sizeof(s2));
-		unsigned char s3[] = { 0xE8, 0xF3, 0x43, 0x00, 0x00 };
-		SafeWriteBuf(RelocAddr<uintptr_t>(0x24EC8C8).GetUIntPtr(), &s3, sizeof(s3));
-		unsigned char s4[] = { 0x5B };
-		SafeWriteBuf(RelocAddr<uintptr_t>(0x24EC8CD).GetUIntPtr(), &s4, sizeof(s4));
-		unsigned char s5[] = { 0xC3 };
-		SafeWriteBuf(RelocAddr<uintptr_t>(0x24EC8CE).GetUIntPtr(), &s5, sizeof(s5));
-		unsigned char s6[] = { 0xE8, 0xE4, 0x02, 0x00, 0x00 };
-		SafeWriteBuf(RelocAddr<uintptr_t>(0x24EC5D6).GetUIntPtr(), &s6, sizeof(s6));
-		unsigned char s7[] = { 0xF3, 0x0F, 0x11, 0x41, 0xF0 };
-		SafeWriteBuf(RelocAddr<uintptr_t>(0x24F0CDC).GetUIntPtr(), &s7, sizeof(s7));
-		//fix moving objects
-		unsigned char data16[] = { 0x0F, 0x2E, 0x05, 0x5B, 0x98, 0x36, 0x02 };
-		SafeWriteBuf(RelocAddr<uintptr_t>(0x14BEC1E).GetUIntPtr(), &data16, sizeof(data16));
+		{
+			struct Patch1_Code : Xbyak::CodeGenerator {
+				Patch1_Code(void* buf, uintptr_t a_hookTarget, uintptr_t a_frameTimer) : Xbyak::CodeGenerator(4096, buf) {
+					Xbyak::Label retnLabel;
+					Xbyak::Label timerLabel;
+
+					mov(r13, ptr[rip + timerLabel]);
+					mulss(xmm2, dword[r13]);
+
+					jmp(ptr[rip + retnLabel]);
+
+					L(retnLabel);
+					dq(a_hookTarget + 0x8);
+
+					L(timerLabel);
+					dq(a_frameTimer);
+				}
+			};
+			void* codeBuf1 = g_localTrampoline.StartAlloc();
+			Patch1_Code code1(codeBuf1, RelocAddr<uintptr_t>(0xF49645).GetUIntPtr(), FrametimeAddress);
+			g_localTrampoline.EndAlloc(code1.getCurr());
+			g_branchTrampoline.Write5Branch(RelocAddr<uintptr_t>(0xF49645).GetUIntPtr(), uintptr_t(code1.getCode()));
+			SafeWriteBuf(RelocAddr<uintptr_t>(0xF49645 + 0x5).GetUIntPtr(), "\x90\x90\x90", 3);
+		}
+		{
+			struct Patch2_Code : Xbyak::CodeGenerator {
+				Patch2_Code(void* buf, uintptr_t a_hookTarget, uintptr_t a_value) : Xbyak::CodeGenerator(4096, buf) {
+					Xbyak::Label retnLabel;
+					Xbyak::Label valueLabel;
+
+					mov(r13, ptr[rip + valueLabel]);
+					movss(xmm2, dword[r13]);
+
+					jmp(ptr[rip + retnLabel]);
+
+					L(retnLabel);
+					dq(a_hookTarget + 0x8);
+
+					L(valueLabel);
+					dq(a_value);
+				}
+			};
+			void* codeBuf2 = g_localTrampoline.StartAlloc();
+			Patch2_Code code2(codeBuf2, RelocAddr<uintptr_t>(0xF49623).GetUIntPtr(), RelocAddr<uintptr_t>(0xF49664).GetUIntPtr());
+			g_localTrampoline.EndAlloc(code2.getCurr());
+			g_branchTrampoline.Write5Branch(RelocAddr<uintptr_t>(0xF49623).GetUIntPtr(), uintptr_t(code2.getCode()));
+			SafeWriteBuf(RelocAddr<uintptr_t>(0xF49623 + 0x5).GetUIntPtr(), "\x90\x90\x90", 3);
+		}
+		{
+			struct Patch3_Code : Xbyak::CodeGenerator {
+				Patch3_Code(void* buf, uintptr_t a_hookTarget, uintptr_t a_value) : Xbyak::CodeGenerator(4096, buf) {
+					Xbyak::Label retnLabel;
+					Xbyak::Label valueLabel;
+
+					mov(r13, ptr[rip + valueLabel]);
+					movss(xmm2, dword[r13]);
+
+					jmp(ptr[rip + retnLabel]);
+
+					L(retnLabel);
+					dq(a_hookTarget + 0x8);
+
+					L(valueLabel);
+					dq(a_value);
+				}
+			};
+			void* codeBuf3 = g_localTrampoline.StartAlloc();
+			Patch3_Code code3(codeBuf3, RelocAddr<uintptr_t>(0xF4962D).GetUIntPtr(), RelocAddr<uintptr_t>(0xF49668).GetUIntPtr());
+			g_localTrampoline.EndAlloc(code3.getCurr());
+			g_branchTrampoline.Write5Branch(RelocAddr<uintptr_t>(0xF4962D).GetUIntPtr(), uintptr_t(code3.getCode()));
+			SafeWriteBuf(RelocAddr<uintptr_t>(0xF4962D + 0x5).GetUIntPtr(), "\x90\x90\x90", 3);
+		}
 	}
 	if (FixStuttering) {
 		//cvttss2si rcx,xmm3 fix
-		//jmp
-		unsigned char data6[] = { 0xE9, 0x92, 0x9D, 0xFF, 0xFF };
-		SafeWriteBuf(RelocAddr<uintptr_t>(0x1D6EB96).GetUIntPtr(), &data6, sizeof(data6));
 		//= 1
 		float value1 = 1;
-		SafeWriteBuf(RelocAddr<uintptr_t>(0x1D6D470).GetUIntPtr(), &value1, sizeof(float));
-		//movss xmm3
-		unsigned char data7[] = { 0xF3, 0x0F, 0x10, 0x1D, 0x3B, 0x4B, 0x00, 0x00, 0xF3, 0x48, 0x0F, 0x2C, 0xCB, 0xE9, 0x5C, 0x62, 0x00, 0x00 };
-		SafeWriteBuf(RelocAddr<uintptr_t>(0x1D6892D).GetUIntPtr(), &data7, sizeof(data7));
-		//C24 = 0
-		unsigned char data9[] = { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 };
-		SafeWriteBuf(RelocAddr<uintptr_t>(0x1D6EDA1).GetUIntPtr(), &data9, sizeof(data9));
-		//C20 = FPS
-		unsigned char data10[] = { 0xF3, 0x0F, 0x11, 0x35, 0xCD, 0x40, 0x7D, 0x04 };
-		SafeWriteBuf(RelocAddr<uintptr_t>(0x1D6EB4B).GetUIntPtr(), &data10, sizeof(data10));
-		//C1C = FPS
-		unsigned char data11[] = { 0xF3, 0x0F, 0x11, 0x35, 0x9F, 0x40, 0x7D, 0x04 };
-		SafeWriteBuf(RelocAddr<uintptr_t>(0x1D6EB75).GetUIntPtr(), &data11, sizeof(data11));
-		//fix moving objects
-		unsigned char data14[] = { 0xF3, 0x0F, 0x10, 0x0D, 0xC8, 0x1A, 0x7C, 0x01, 0xE9, 0xD3, 0xFD, 0xFF, 0xFF };
-		SafeWriteBuf(RelocAddr<uintptr_t>(0x14D58A0).GetUIntPtr(), &data14, sizeof(data14));
-		unsigned char data22[] = { 0xF3, 0x0F, 0x11, 0x15, 0xB6, 0x42, 0x7D, 0x04, 0x48, 0x83, 0xC4, 0x40, 0x5F, 0xC3 };
-		SafeWriteBuf(RelocAddr<uintptr_t>(0x1D6EBF2).GetUIntPtr(), &data22, sizeof(data22));
-		//fix hair/clothes
-		if (!FixWindSpeed) {
-			unsigned char data18[] = { 0xF3, 0x44, 0x0F, 0x10, 0x0D, 0x59, 0x36, 0x7D, 0x04 };
-			SafeWriteBuf(RelocAddr<uintptr_t>(0x1D6F84E).GetUIntPtr(), &data18, sizeof(data18));
-			unsigned char data19[] = { 0xF3, 0x44, 0x0F, 0x10, 0x0D, 0xB0, 0x35, 0x7D, 0x04 };
-			SafeWriteBuf(RelocAddr<uintptr_t>(0x1D6F8F7).GetUIntPtr(), &data19, sizeof(data19));
-			unsigned char data21[] = { 0xF3, 0x0F, 0x10, 0x05, 0xCD, 0x33, 0x7D, 0x04 };
-			SafeWriteBuf(RelocAddr<uintptr_t>(0x1D6FADB).GetUIntPtr(), &data21, sizeof(data21));
+		{
+			SafeWriteBuf(RelocAddr<uintptr_t>(0x1D6D470).GetUIntPtr(), &value1, sizeof(float));
+			struct Patch1_Code : Xbyak::CodeGenerator {
+				Patch1_Code(void* buf, uintptr_t a_hookTarget, uintptr_t a_fps60Value) : Xbyak::CodeGenerator(4096, buf) {
+					Xbyak::Label retnLabel;
+					Xbyak::Label valueLabel;
+
+					mov(r9, ptr[rip + valueLabel]);
+					movss(xmm3, dword[r9]);
+					cvttss2si(rcx, xmm3);
+
+					jmp(ptr[rip + retnLabel]);
+
+					L(retnLabel);
+					dq(a_hookTarget + 0x5);
+
+					L(valueLabel);
+					dq(a_fps60Value);
+				}
+			};
+			void* codeBuf1 = g_localTrampoline.StartAlloc();
+			Patch1_Code code1(codeBuf1, RelocAddr<uintptr_t>(0x1D6EB96).GetUIntPtr(), RelocAddr<uintptr_t>(0x1D6D470).GetUIntPtr());
+			g_localTrampoline.EndAlloc(code1.getCurr());
+			g_branchTrampoline.Write5Branch(RelocAddr<uintptr_t>(0x1D6EB96).GetUIntPtr(), uintptr_t(code1.getCode()));
+			//C24 = 0
+			SafeWriteBuf(RelocAddr<uintptr_t>(0x1D6EDA1).GetUIntPtr(), "\x90\x90\x90\x90\x90\x90\x90\x90", 8);
 		}
+		{
+			//C20 = FPS
+			struct Patch2_Code : Xbyak::CodeGenerator {
+				Patch2_Code(void* buf, uintptr_t a_hookTarget) : Xbyak::CodeGenerator(4096, buf) {
+					Xbyak::Label retnLabel;
+
+					minss(xmm2, ptr[rsp + 0x20]);
+					movss(xmm2, xmm6);
+
+					jmp(ptr[rip + retnLabel]);
+
+					L(retnLabel);
+					dq(a_hookTarget + 0x6);
+				}
+			};
+			void* codeBuf2 = g_localTrampoline.StartAlloc();
+			Patch2_Code code2(codeBuf2, RelocAddr<uintptr_t>(0x1D6EB45).GetUIntPtr());
+			g_localTrampoline.EndAlloc(code2.getCurr());
+			g_branchTrampoline.Write5Branch(RelocAddr<uintptr_t>(0x1D6EB45).GetUIntPtr(), uintptr_t(code2.getCode()));
+
+			SafeWriteBuf(RelocAddr<uintptr_t>(0x1D6EB45 + 0x5).GetUIntPtr(), "\x90", 1);
+			SafeWriteBuf(RelocAddr<uintptr_t>(0x1D6EB45 + 0xE).GetUIntPtr(), "\x90\x90\x90\x90", 4);
+			//C1C = FPS
+			SafeWriteBuf(RelocAddr<uintptr_t>(0x1D6EB71).GetUIntPtr(), "\x90\x90\x90\x90", 4);
+		}
+		{
+			//fix moving objects
+			struct Patch3_Code : Xbyak::CodeGenerator {
+				Patch3_Code(void* buf, uintptr_t a_hookTarget, uintptr_t a_fps60Value) : Xbyak::CodeGenerator(4096, buf) {
+					Xbyak::Label retnLabel;
+					Xbyak::Label valueLabel;
+
+					mov(r8, ptr[rip + valueLabel]);
+					movss(xmm1, dword[r8]);
+
+					jmp(ptr[rip + retnLabel]);
+
+					L(retnLabel);
+					dq(a_hookTarget + 0x5);
+
+					L(valueLabel);
+					dq(a_fps60Value);
+				}
+			};
+			void* codeBuf3 = g_localTrampoline.StartAlloc();
+			Patch3_Code code3(codeBuf3, RelocAddr<uintptr_t>(0x14D58A0).GetUIntPtr(), FPS60ValueAddress);
+			g_localTrampoline.EndAlloc(code3.getCurr());
+			g_branchTrampoline.Write5Branch(RelocAddr<uintptr_t>(0x14D58A0).GetUIntPtr(), uintptr_t(code3.getCode()));
+		}		
 	}
 	if (FixWhiteScreen) {
 		unsigned char data23[] = { 0x90, 0x90 };
 		SafeWriteBuf(RelocAddr<uintptr_t>(0x172A893).GetUIntPtr(), &data23, sizeof(data23));
 	}
-	if (FixWindSpeed) {
-		unsigned char data17[] = { 0x0F, 0x29, 0x74, 0x24, 0x30, 0xF3, 0x0F, 0x10, 0x35, 0x97, 0x7A, 0xEC, 0x00, 0xE9, 0x2B, 0xFE, 0xFF, 0xFF };
-		SafeWriteBuf(RelocAddr<uintptr_t>(0x1DCF8CC).GetUIntPtr(), &data17, sizeof(data17));
-		unsigned char data8[] = { 0xE9, 0xC6, 0x01, 0x00, 0x00 };
-		SafeWriteBuf(RelocAddr<uintptr_t>(0x1DCF701).GetUIntPtr(), &data8, sizeof(data8));
+	if (FixWindSpeed) { //fix hair/clothes
+		{
+			struct Patch1_Code : Xbyak::CodeGenerator {
+				Patch1_Code(void* buf, uintptr_t a_hookTarget, uintptr_t a_fps60Value) : Xbyak::CodeGenerator(4096, buf) {
+					Xbyak::Label retnLabel;
+					Xbyak::Label valueLabel;
+
+					movaps(ptr[rsp + 0x30], xmm6);
+					mov(r9, ptr[rip + valueLabel]);
+					movss(xmm6, dword[r9]);
+
+					jmp(ptr[rip + retnLabel]);
+
+					L(retnLabel);
+					dq(a_hookTarget + 0x8);
+
+					L(valueLabel);
+					dq(a_fps60Value);
+				}
+			};
+			void* codeBuf1 = g_localTrampoline.StartAlloc();
+			Patch1_Code code1(codeBuf1, RelocAddr<uintptr_t>(0x1DCF701).GetUIntPtr(), DefaultValueAddress);
+			g_localTrampoline.EndAlloc(code1.getCurr());
+			g_branchTrampoline.Write5Branch(RelocAddr<uintptr_t>(0x1DCF701).GetUIntPtr(), uintptr_t(code1.getCode()));
+
+			SafeWriteBuf(RelocAddr<uintptr_t>(0x1DCF701 + 0x5).GetUIntPtr(), "\x90\x90\x90", 3);
+		}
+		{
+			struct Patch2_Code : Xbyak::CodeGenerator {
+				Patch2_Code(void* buf, uintptr_t a_hookTarget, uintptr_t a_frameTimer) : Xbyak::CodeGenerator(4096, buf) {
+					Xbyak::Label retnLabel;
+					Xbyak::Label timerLabel;
+
+					mov(r8, ptr[rip + timerLabel]);
+					movss(xmm9, dword[r8]);
+
+					jmp(ptr[rip + retnLabel]);
+
+					L(retnLabel);
+					dq(a_hookTarget + 0x9);
+
+					L(timerLabel);
+					dq(a_frameTimer);
+				}
+			};
+			void* codeBuf2 = g_localTrampoline.StartAlloc();
+			Patch2_Code code2(codeBuf2, RelocAddr<uintptr_t>(0x1D6F84E).GetUIntPtr(), FrametimeAddress);
+			g_localTrampoline.EndAlloc(code2.getCurr());
+			g_branchTrampoline.Write5Branch(RelocAddr<uintptr_t>(0x1D6F84E).GetUIntPtr(), uintptr_t(code2.getCode()));
+
+			SafeWriteBuf(RelocAddr<uintptr_t>(0x1D6F84E + 0x5).GetUIntPtr(), "\x90\x90\x90\x90", 4);
+		}
+		{
+			struct Patch3_Code : Xbyak::CodeGenerator {
+				Patch3_Code(void* buf, uintptr_t a_hookTarget, uintptr_t a_frameTimer) : Xbyak::CodeGenerator(4096, buf) {
+					Xbyak::Label retnLabel;
+					Xbyak::Label timerLabel;
+
+					mov(r8, ptr[rip + timerLabel]);
+					movss(xmm9, dword[r8]);
+
+					jmp(ptr[rip + retnLabel]);
+
+					L(retnLabel);
+					dq(a_hookTarget + 0x9);
+
+					L(timerLabel);
+					dq(a_frameTimer);
+				}
+			};
+			void* codeBuf3 = g_localTrampoline.StartAlloc();
+			Patch3_Code code3(codeBuf3, RelocAddr<uintptr_t>(0x1D6F8F7).GetUIntPtr(), FrametimeAddress);
+			g_localTrampoline.EndAlloc(code3.getCurr());
+			g_branchTrampoline.Write5Branch(RelocAddr<uintptr_t>(0x1D6F8F7).GetUIntPtr(), uintptr_t(code3.getCode()));
+
+			SafeWriteBuf(RelocAddr<uintptr_t>(0x1D6F8F7 + 0x5).GetUIntPtr(), "\x90\x90\x90\x90", 4);
+		}
+		{
+			struct Patch4_Code : Xbyak::CodeGenerator {
+				Patch4_Code(void* buf, uintptr_t a_hookTarget, uintptr_t a_frameTimer) : Xbyak::CodeGenerator(4096, buf) {
+					Xbyak::Label retnLabel;
+					Xbyak::Label timerLabel;
+
+					mov(r8, ptr[rip + timerLabel]);
+					movss(xmm0, dword[r8]);
+
+					jmp(ptr[rip + retnLabel]);
+
+					L(retnLabel);
+					dq(a_hookTarget + 0x8);
+
+					L(timerLabel);
+					dq(a_frameTimer);
+				}
+			};
+			void* codeBuf4 = g_localTrampoline.StartAlloc();
+			Patch4_Code code4(codeBuf4, RelocAddr<uintptr_t>(0x1D6FADB).GetUIntPtr(), FrametimeAddress);
+			g_localTrampoline.EndAlloc(code4.getCurr());
+			g_branchTrampoline.Write5Branch(RelocAddr<uintptr_t>(0x1D6FADB).GetUIntPtr(), uintptr_t(code4.getCode()));
+
+			SafeWriteBuf(RelocAddr<uintptr_t>(0x1D6FADB + 0x5).GetUIntPtr(), "\x90\x90\x90", 3);
+		}
 	}
 	if (FixRotationSpeed) {
-		//fix mouse rotation speed
-		unsigned char data12[] = { 0xF3, 0x0F, 0x59, 0x0D, 0x10, 0x9D, 0x97, 0x01 };
-		SafeWriteBuf(RelocAddr<uintptr_t>(0x129CA32).GetUIntPtr(), &data12, sizeof(data12));
-		unsigned char fPickMouseRotationSpeed[] = { 0x96, 0x43, 0x8B, 0x3C, 0x00 }; //0.017
-		SafeWriteBuf(RelocAddr<uintptr_t>(0x2C1674A).GetUIntPtr(), fPickMouseRotationSpeed, sizeof(fPickMouseRotationSpeed));
+		//fix lockpick rotation speed
+		struct Patch_Code : Xbyak::CodeGenerator {
+			Patch_Code(void* buf, uintptr_t a_hookTarget, uintptr_t a_value) : Xbyak::CodeGenerator(4096, buf)
+			{
+				Xbyak::Label retnLabel;
+				Xbyak::Label valueLabel;
+
+				mov(r10, ptr[rip + valueLabel]);
+				mulss(xmm1, dword[r10]);
+
+				jmp(ptr[rip + retnLabel]);
+
+				L(retnLabel);
+				dq(a_hookTarget + 0x8);
+
+				L(valueLabel);
+				dq(a_value);
+			}
+		};
+		void* codeBuf = g_localTrampoline.StartAlloc();
+		Patch_Code code(codeBuf, RelocAddr<uintptr_t>(0x129CA32).GetUIntPtr(), FPS60ValueAddress);
+		g_localTrampoline.EndAlloc(code.getCurr());
+
+		g_branchTrampoline.Write5Branch(RelocAddr<uintptr_t>(0x129CA32).GetUIntPtr(), uintptr_t(code.getCode()));
+
+		SafeWriteBuf(RelocAddr<uintptr_t>(0x129CA32 + 0x5).GetUIntPtr(), "\x90\x90\x90", 3);
 	}
-	if (DisableAnimationOnLoadingScreens) {
-		unsigned char data20[] = { 0x90, 0x90, 0x90, 0x90 };
-		SafeWriteBuf(RelocAddr<uintptr_t>(0xCBFFCD).GetUIntPtr(), &data20, sizeof(data20));
-	}
-	if (DisableBlackLoadingScreens) {
-		unsigned char data15[] = { 0xEB, 0x1E };
-		SafeWriteBuf(RelocAddr<uintptr_t>(0x1297076).GetUIntPtr(), &data15, sizeof(data15));
+	if (FixWorkshopRotationSpeed) {
+		struct Patch_Code : Xbyak::CodeGenerator {
+			Patch_Code(void* buf, uintptr_t a_hookTarget, uintptr_t a_frameTimer) : Xbyak::CodeGenerator(4096, buf)
+			{
+				Xbyak::Label retnLabel;
+				Xbyak::Label timerLabel;
+
+				mov(r8, ptr[rip + timerLabel]);
+				mulss(xmm1, dword[r8]);
+
+				jmp(ptr[rip + retnLabel]);
+
+				L(retnLabel);
+				dq(a_hookTarget + 0x8);
+
+				L(timerLabel);
+				dq(a_frameTimer);
+			}
+		};
+		void* codeBuf = g_localTrampoline.StartAlloc();
+		Patch_Code code(codeBuf, RelocAddr<uintptr_t>(0x2182B2).GetUIntPtr(), FrametimeAddress);
+		g_localTrampoline.EndAlloc(code.getCurr());
+
+		g_branchTrampoline.Write5Branch(RelocAddr<uintptr_t>(0x2182B2).GetUIntPtr(), uintptr_t(code.getCode()));
 	}
 	if (FixLoadingModel) {
-		//fix rotation on loading screen
-		unsigned char data24[] = { 0x8B, 0x8B, 0x6C, 0x02, 0x00, 0x00, 0xF3, 0x44, 0x0F, 0x10, 0x05, 0x25, 0xFC, 0x9F, 0x01, 0xE9, 0x2A, 0xFD, 0xFF, 0xFF };
-		SafeWriteBuf(RelocAddr<uintptr_t>(0x129773C).GetUIntPtr(), &data24, sizeof(data24));
-		unsigned char data25[] = { 0xE9, 0xC3, 0x02, 0x00, 0x00, 0x90 };
-		SafeWriteBuf(RelocAddr<uintptr_t>(0x1297474).GetUIntPtr(), &data25, sizeof(data25));
-		unsigned char data13[] = { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 };
-		SafeWriteBuf(RelocAddr<uintptr_t>(0x1298EA3).GetUIntPtr(), &data13, sizeof(data13));
+		{
+			//Fix repeat rate
+			struct Patch0_Code : Xbyak::CodeGenerator {
+				Patch0_Code(void* buf, uintptr_t a_hookTarget, uintptr_t a_value) : Xbyak::CodeGenerator(4096, buf)
+				{
+					Xbyak::Label retnLabel;
+					Xbyak::Label valueLabel;
+
+					mov(ecx, ptr[rbx + 0x26C]);
+					mov(r8, ptr[rip + valueLabel]);
+					movss(xmm8, dword[r8]);
+
+					jmp(ptr[rip + retnLabel]);
+
+					L(retnLabel);
+					dq(a_hookTarget + 0x6);
+
+					L(valueLabel);
+					dq(a_value);
+				}
+			};
+			void* codeBuf0 = g_localTrampoline.StartAlloc();
+			Patch0_Code code0(codeBuf0, RelocAddr<uintptr_t>(0x1297474).GetUIntPtr(), DefaultValueAddress);
+			g_localTrampoline.EndAlloc(code0.getCurr());
+			g_branchTrampoline.Write5Branch(RelocAddr<uintptr_t>(0x1297474).GetUIntPtr(), uintptr_t(code0.getCode()));
+
+			SafeWriteBuf(RelocAddr<uintptr_t>(0x1297474 + 0x5).GetUIntPtr(), "\x90", 1);
+
+			//Fix rotation
+			SafeWriteBuf(RelocAddr<uintptr_t>(0x1298D0F).GetUIntPtr(), "\x90\x90\x90\x90\x90\x90", 6);
+		}
+		{
+			//Fix pan speed
+			//Up
+			float PanSpeed = 0.2941176470588235; //0.005
+			SafeWriteBuf(PanSpeedAddress.GetUIntPtr(), &PanSpeed, sizeof(float));
+
+			struct Patch1_Code : Xbyak::CodeGenerator {
+				Patch1_Code(void* buf, uintptr_t a_hookTarget, uintptr_t a_value, uintptr_t a_frameTimer) : Xbyak::CodeGenerator(4096, buf)
+				{
+					Xbyak::Label retnLabel;
+					Xbyak::Label valueLabel;
+					Xbyak::Label timerLabel;
+
+					mov(r10, ptr[rip + valueLabel]);
+					movss(xmm0, dword[r10]);
+					mov(r10, ptr[rip + timerLabel]);
+					mulss(xmm0, dword[r10]);
+
+					jmp(ptr[rip + retnLabel]);
+
+					L(retnLabel);
+					dq(a_hookTarget + 0x8);
+
+					L(valueLabel);
+					dq(a_value);
+
+					L(timerLabel);
+					dq(a_frameTimer);
+				}
+			};
+			void* codeBuf1 = g_localTrampoline.StartAlloc();
+			Patch1_Code code1(codeBuf1, RelocAddr<uintptr_t>(0x129758C).GetUIntPtr(), PanSpeedAddress, FrametimeAddress);
+			g_localTrampoline.EndAlloc(code1.getCurr());
+			g_branchTrampoline.Write5Branch(RelocAddr<uintptr_t>(0x129758C).GetUIntPtr(), uintptr_t(code1.getCode()));
+
+			SafeWriteBuf(RelocAddr<uintptr_t>(0x129758C + 0x5).GetUIntPtr(), "\x90\x90\x90", 3);
+		}
+		{
+			//Down
+			struct Patch2_Code : Xbyak::CodeGenerator {
+				Patch2_Code(void* buf, uintptr_t a_hookTarget, uintptr_t a_value, uintptr_t a_frameTimer) : Xbyak::CodeGenerator(4096, buf)
+				{
+					Xbyak::Label retnLabel;
+					Xbyak::Label valueLabel;
+					Xbyak::Label timerLabel;
+
+					mov(r10, ptr[rip + valueLabel]);
+					movss(xmm0, dword[r10]);
+					mov(r10, ptr[rip + timerLabel]);
+					mulss(xmm0, dword[r10]);
+
+					jmp(ptr[rip + retnLabel]);
+
+					L(retnLabel);
+					dq(a_hookTarget + 0x8);
+
+					L(valueLabel);
+					dq(a_value);
+
+					L(timerLabel);
+					dq(a_frameTimer);
+				}
+			};
+			void* codeBuf2 = g_localTrampoline.StartAlloc();
+			Patch2_Code code2(codeBuf2, RelocAddr<uintptr_t>(0x12975E6).GetUIntPtr(), PanSpeedAddress, FrametimeAddress);
+			g_localTrampoline.EndAlloc(code2.getCurr());
+			g_branchTrampoline.Write5Branch(RelocAddr<uintptr_t>(0x12975E6).GetUIntPtr(), uintptr_t(code2.getCode()));
+
+			SafeWriteBuf(RelocAddr<uintptr_t>(0x12975E6 + 0x5).GetUIntPtr(), "\x90\x90\x90", 3);
+		}
+		{
+			//Left
+			struct Patch3_Code : Xbyak::CodeGenerator {
+				Patch3_Code(void* buf, uintptr_t a_hookTarget, uintptr_t a_value, uintptr_t a_frameTimer) : Xbyak::CodeGenerator(4096, buf)
+				{
+					Xbyak::Label retnLabel;
+					Xbyak::Label valueLabel;
+					Xbyak::Label timerLabel;
+
+					mov(r10, ptr[rip + valueLabel]);
+					movss(xmm0, dword[r10]);
+					mov(r10, ptr[rip + timerLabel]);
+					mulss(xmm0, dword[r10]);
+
+					jmp(ptr[rip + retnLabel]);
+
+					L(retnLabel);
+					dq(a_hookTarget + 0x8);
+
+					L(valueLabel);
+					dq(a_value);
+
+					L(timerLabel);
+					dq(a_frameTimer);
+				}
+			};
+			void* codeBuf3 = g_localTrampoline.StartAlloc();
+			Patch3_Code code3(codeBuf3, RelocAddr<uintptr_t>(0x129763F).GetUIntPtr(), PanSpeedAddress, FrametimeAddress);
+			g_localTrampoline.EndAlloc(code3.getCurr());
+			g_branchTrampoline.Write5Branch(RelocAddr<uintptr_t>(0x129763F).GetUIntPtr(), uintptr_t(code3.getCode()));
+
+			SafeWriteBuf(RelocAddr<uintptr_t>(0x129763F + 0x5).GetUIntPtr(), "\x90\x90\x90", 3);
+		}
+		{
+			//Right
+			struct Patch4_Code : Xbyak::CodeGenerator {
+				Patch4_Code(void* buf, uintptr_t a_hookTarget, uintptr_t a_value, uintptr_t a_frameTimer) : Xbyak::CodeGenerator(4096, buf)
+				{
+					Xbyak::Label retnLabel;
+					Xbyak::Label valueLabel;
+					Xbyak::Label timerLabel;
+
+					mov(r10, ptr[rip + valueLabel]);
+					movss(xmm0, dword[r10]);
+					mov(r10, ptr[rip + timerLabel]);
+					mulss(xmm0, dword[r10]);
+
+					jmp(ptr[rip + retnLabel]);
+
+					L(retnLabel);
+					dq(a_hookTarget + 0x8);
+
+					L(valueLabel);
+					dq(a_value);
+
+					L(timerLabel);
+					dq(a_frameTimer);
+				}
+			};
+			void* codeBuf4 = g_localTrampoline.StartAlloc();
+			Patch4_Code code4(codeBuf4, RelocAddr<uintptr_t>(0x12976A4).GetUIntPtr(), PanSpeedAddress, FrametimeAddress);
+			g_localTrampoline.EndAlloc(code4.getCurr());
+			g_branchTrampoline.Write5Branch(RelocAddr<uintptr_t>(0x12976A4).GetUIntPtr(), uintptr_t(code4.getCode()));
+
+			SafeWriteBuf(RelocAddr<uintptr_t>(0x12976A4 + 0x5).GetUIntPtr(), "\x90\x90\x90", 3);
+		}
+	}
+	if (FixStuckAnimation) {
+		struct Patch_Code : Xbyak::CodeGenerator {
+			Patch_Code(void* buf, uintptr_t a_hookTarget, uintptr_t a_value) : Xbyak::CodeGenerator(4096, buf)
+			{
+				Xbyak::Label retnLabel;
+				Xbyak::Label valueLabel;
+
+				mov(r14, ptr[rip + valueLabel]);
+				movss(xmm3, dword[r14]);
+
+				jmp(ptr[rip + retnLabel]);
+
+				L(retnLabel);
+				dq(a_hookTarget + 0x5);
+
+				L(valueLabel);
+				dq(a_value);
+			}
+		};
+		void* codeBuf = g_localTrampoline.StartAlloc();
+		Patch_Code code(codeBuf, RelocAddr<uintptr_t>(0x252E789).GetUIntPtr(), FPS60ValueAddress);
+		g_localTrampoline.EndAlloc(code.getCurr());
+
+		g_branchTrampoline.Write5Branch(RelocAddr<uintptr_t>(0x252E789).GetUIntPtr(), uintptr_t(code.getCode()));
 	}
 	if (FixMotionResponsive) {
-		float MotionFeedback = 294.1176470588235;
-		SafeWriteBuf(RelocAddr<uintptr_t>(0x2845F5).GetUIntPtr(), &MotionFeedback, sizeof(float));
-		SafeWriteBuf(RelocAddr<uintptr_t>(0x2844EB).GetUIntPtr(), "\xE9\xAC\x00\x00\x00\x0F\x2F\xC1\x90\x90\x90\x90", 12);
-		SafeWriteBuf(RelocAddr<uintptr_t>(0x28459C).GetUIntPtr(), "\xF3\x0F\x10\x45\x40\xF3\x0F\x10\x0D\x4C\x00\x00\x00\xF3\x0F\x59\xCE\xEB\x05\xCC\xC2\x00\x00\xCC\xE9\x37\xFF\xFF\xFF", 29);
-	}
-	GetProcess();
-	ReadProcessMemory(f4handle, (PVOID*)FSAddress, &FullScr, sizeof(FullScr), 0);
-	if (FullScr == 1) {
-		_MESSAGE("Full screen");
-	}
-	if (FullScr == 0) {
-	_MESSAGE("Windowed");
+		float MotionFeedback = 294.1176470588235; //5
+		SafeWriteBuf(MotionFeedBackAddress.GetUIntPtr(), &MotionFeedback, sizeof(float));
+
+		struct Patch_Code : Xbyak::CodeGenerator {
+			Patch_Code(void* buf, uintptr_t a_hookTarget, uintptr_t a_value) : Xbyak::CodeGenerator(4096, buf)
+			{
+				Xbyak::Label retnLabel;
+				Xbyak::Label valueLabel;
+
+				mov(r9, ptr[rip + valueLabel]);
+				movss(xmm1, dword[r9]);
+				mulss(xmm1, xmm6);
+				comiss(xmm0, xmm1);
+
+				jmp(ptr[rip + retnLabel]);
+
+				L(retnLabel);
+				dq(a_hookTarget + 0x7);
+
+				L(valueLabel);
+				dq(a_value);
+			}
+		};
+		void* codeBuf = g_localTrampoline.StartAlloc();
+		Patch_Code code(codeBuf, RelocAddr<uintptr_t>(0x2844F0).GetUIntPtr(), MotionFeedBackAddress);
+		g_localTrampoline.EndAlloc(code.getCurr());
+
+		g_branchTrampoline.Write5Branch(RelocAddr<uintptr_t>(0x2844F0).GetUIntPtr(), uintptr_t(code.getCode()));
 	}
 }
 
@@ -772,6 +1259,7 @@ void onF4SEMessage(F4SEMessagingInterface::Message* msg) {
 			PatchGame();
 			HookFPS();
 			if (LimitCPUThreadsNG) {
+				GetProcess();
 				_MESSAGE("Getting the number of processor threads...");
 				GetNumberOfThreads();
 				_MESSAGE("Getting the number of processor threads OK");

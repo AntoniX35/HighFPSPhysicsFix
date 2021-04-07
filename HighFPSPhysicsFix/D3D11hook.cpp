@@ -8,7 +8,7 @@ RelocAddr<uintptr_t> ResizeBuffersDisableAddress(0x1D0AC27);
 RelocAddr<uintptr_t> ResizeTargetAddress(0x1D0AFA9);
 RelocAddr<uintptr_t> PresentInjectAddress(0x1D0B699);
 RelocAddr<uintptr_t> ResizeBuffersInjectAddress(0x1D0ADA0);
-RelocAddr<uintptr_t> MovRaxRcxAddress(0x1D0ADB8);
+RelocAddr<uintptr_t> MovRaxRcxAddress(0x1D0ADB5);
 
 PFN_D3D11_CREATE_DEVICE_AND_SWAP_CHAIN D3D11CreateDeviceAndSwapChain_Original = nullptr;
 
@@ -279,12 +279,30 @@ void PatchDisplay() {
         };
         _MESSAGE("IDXGISwapChain::ResizeBuffers patching...");
         {
-            ResizeBuffersInjectArgs code(ResizeBuffersInjectAddress + 0x18, uintptr_t(&swapchain));
+            ResizeBuffersInjectArgs code(ResizeBuffersInjectAddress + 0x15, uintptr_t(&swapchain));
             g_branchTrampoline.Write6Branch(ResizeBuffersInjectAddress, code.get());
             safe_memset(ResizeBuffersInjectAddress + 0x6, 0xCC, 0x12);
         }
-        SafeWriteBuf(MovRaxRcxAddress.GetUIntPtr(), "\x48\x8B\x01", 3);
         _MESSAGE("IDXGISwapChain::ResizeBuffers OK");
+    }
+    {
+        struct Patch : JITASM::JITASM {
+            Patch(uintptr_t retnAddr) : JITASM() {
+
+                Xbyak::Label retnLabel;
+
+                mov(rax, ptr[rcx]);
+
+                jmp(ptr[rip + retnLabel]);
+
+                L(retnLabel);
+                dq(retnAddr);
+            }
+        };
+        {
+            Patch code(MovRaxRcxAddress + 0x6);
+            g_branchTrampoline.Write6Branch(MovRaxRcxAddress, code.get());
+        }
     }
 }
 
