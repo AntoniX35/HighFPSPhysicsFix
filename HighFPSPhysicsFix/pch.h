@@ -3,7 +3,6 @@
 
 #include <common/IMemPool.h>
 
-
 #include <f4se_common/SafeWrite.h>
 #include <f4se_common/BranchTrampoline.h>
 

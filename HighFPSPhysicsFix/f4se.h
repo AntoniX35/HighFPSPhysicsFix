@@ -9,7 +9,7 @@ namespace SDT
     static inline constexpr std::size_t MAX_TRAMPOLINE_CODEGEN = 1024;
 
     class IF4SE :
-        public IF4SEBase<F4SEInterfaceFlags::kTrampoline | F4SEInterfaceFlags::kMessaging, 320ui64, 1024ui64>,
+        public IF4SEBase<F4SEInterfaceFlags::kTrampoline | F4SEInterfaceFlags::kMessaging, 440ui64, 1120ui64>,
         public ISettingCollection
     {
     public:

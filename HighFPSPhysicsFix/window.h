@@ -85,6 +85,7 @@ namespace SDT
             _Out_ LPRECT lpRect);
 
     public:
+        static inline uintptr_t WriteiLocationX;
         static inline constexpr auto ID = DRIVER_ID::WINDOW;
 
         struct {

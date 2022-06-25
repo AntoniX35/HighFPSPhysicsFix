@@ -10,8 +10,6 @@ namespace SDT
     static constexpr const char* CONF_STATSON = "OSDStatsEnabled";
     
     using namespace Patching;
-    RelocAddr<uintptr_t> UpdateBudgetGame(0x1372494); //77 10                F3 0F10 35 B42B4A02  F3 0F59 35 841F8E01  4C 8D 86 30870000
-    RelocAddr<uintptr_t> UpdateBudgetUI(0x13725A4); //77 10                F3 0F10 35 A42A4A02  F3 0F59 35 741E8E01  
 
     DPapyrus DPapyrus::m_Instance;
 
@@ -58,10 +56,9 @@ namespace SDT
         }
     }
 
-    void DPapyrus::Patch()
-    {
-        if (m_conf.dynbudget_enabled)
-        {
+    void DPapyrus::Patch() {
+        if (m_conf.dynbudget_enabled) {
+            UpdateBudgetUI = UpdateBudgetGame + 0x110;
             struct UpdateBudgetInject : JITASM::JITASM {
                 UpdateBudgetInject(std::uintptr_t targetAddr, bool enable_stats)
                     : JITASM(IF4SE::GetLocalTrampoline())
@@ -91,7 +88,7 @@ namespace SDT
                 UpdateBudgetInject code(UpdateBudgetGame, m_conf.stats_enabled);
                 IF4SE::GetBranchTrampoline().Write6Branch(UpdateBudgetGame, code.get());
 
-                safe_memset(UpdateBudgetGame + 0x6, 0xCC, 2);
+                safe_memset(UpdateBudgetGame + 0x6, 0x90, 2);
             }
             _MESSAGE("[UpdateBudget (game)] OK");
 
@@ -100,7 +97,7 @@ namespace SDT
                 UpdateBudgetInject code(UpdateBudgetUI, m_conf.stats_enabled);
                 IF4SE::GetBranchTrampoline().Write6Branch(UpdateBudgetUI, code.get());
 
-                safe_memset(UpdateBudgetUI + 0x6, 0xCC, 2);
+                safe_memset(UpdateBudgetUI + 0x6, 0x90, 2);
             }
             _MESSAGE("[UpdateBudget (UI)] OK");
         }

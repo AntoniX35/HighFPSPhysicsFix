@@ -2,10 +2,11 @@
 
 #include "WinAPI.h"
 
+float extint;
 bool comboKeyDown = false;
 F4SEScaleformInterface* g_scaleform = NULL;
 F4SEMessagingInterface* g_messaging = NULL;
-PluginHandle			    g_pluginHandle = kPluginHandle_Invalid;
+PluginHandle		    g_pluginHandle = kPluginHandle_Invalid;
 
 static F4SEPapyrusInterface* g_papyrus = NULL;
 
@@ -52,7 +53,18 @@ EventResult	MenuOpenCloseHandler::ReceiveEvent(MenuOpenCloseEvent* evn, void* di
 					SDT::DRender::m_present_flags &= ~DXGI_PRESENT_ALLOW_TEARING;
 				}
 			}
-			SDT::DRender::current_fps_max = SDT::DRender::fps_max;
+			if (SDT::DRender::ext_fps > 0 || SDT::DRender::int_fps > 0) {
+				SDT::DRender::ReadMemory(SDT::DRender::ExteriorInteriorAddress, &extint, sizeof(float));
+				if (extint == 0.0f) {
+					SDT::DRender::current_fps_max = SDT::DRender::fps_max = SDT::DRender::ext_fps;
+				}
+				else {
+					SDT::DRender::current_fps_max = SDT::DRender::fps_max = SDT::DRender::int_fps;
+				}
+			}
+			else {
+				SDT::DRender::current_fps_max = SDT::DRender::fps_max;
+			}
 		}
 	}
 	if (SDT::DRender::lockpick_fps > 0) {
@@ -136,17 +148,16 @@ public:
 					SDT::DOSD::m_stats.draw = false;
 				}
 			}
-			if (keyCode == 36) { //Клавиша Home для 60FPS //ТЕСТ
-				if (comboKeyDown) {
-					_MESSAGE("Home");
-					SDT::DRender::current_fps_max = SDT::DRender::fps60;
-					comboKeyDown = false;
-				}
-				else {
-					SDT::DRender::current_fps_max = SDT::DRender::fps_max;
-					comboKeyDown = true;
-				}
-			}
+			//if (keyCode == 36) { //Key Home for 60FPS TEST
+			//	if (comboKeyDown) {
+			//		SDT::DRender::current_fps_max = SDT::DRender::fps60;
+			//		comboKeyDown = false;
+			//	}
+			//	else {
+			//		SDT::DRender::current_fps_max = SDT::DRender::fps_max;
+			//		comboKeyDown = true;
+			//	}
+			//}
 		}
 		if (isUp && keyCode == SDT::DOSD::m_conf.combo_key) {
 				comboKeyDown = false;
@@ -195,6 +206,41 @@ namespace SDT
 	public:
 		int Run(const F4SEInterface* a_f4se)
 		{
+			SDT::DRender::FrametimeAddress = RelocAddr<uintptr_t>(0x5A66FE8);
+			SDT::DRender::ScreenAddress = RelocAddr<uintptr_t>(0xD42310);
+			SDT::DRender::FullScreenAddress = RelocAddr<uintptr_t>(0xCAABA0);
+			SDT::DRender::ResizeBuffersDisableAddress = RelocAddr<uintptr_t>(0x1D0AC27);
+			SDT::DRender::CreateDXGIFactoryAddress = RelocAddr<uintptr_t>(0x1D1748B);
+			SDT::DRender::FPSAddress = RelocAddr<uintptr_t>(0x1B138D0);
+			SDT::DRender::BlackLoadingScreensAddress = RelocAddr<uintptr_t>(0x1297076);
+			SDT::DRender::LoadingScreensAddress = RelocAddr<uintptr_t>(0xCBFFCD);
+			SDT::DRender::PostLoadInjectAddress = RelocAddr<uintptr_t>(0x126D75B);
+
+			SDT::DPapyrus::UpdateBudgetGame = RelocAddr<uintptr_t>(0x1372494);
+
+			SDT::DWindow::WriteiLocationX = RelocAddr<uintptr_t>(0xD403F9);
+
+			SDT::DMisc::SkipNoINI = RelocAddr<uintptr_t>(0xD41EC4);
+			SDT::DMisc::SetThreadsNGAddress = RelocAddr<uintptr_t>(0x12A242A);
+			SDT::DMisc::ReturnThreadsNGAddress = RelocAddr<uintptr_t>(0xD1D4A8);
+			SDT::DMisc::ReturnThreadsNGJMPAddress = RelocAddr<uintptr_t>(0xC8ED70);
+			SDT::DMisc::FixCPUThreadsJMP1Address = RelocAddr<uintptr_t>(0xE9B7E1);
+			SDT::DMisc::FixCPUThreadsJMP2Address = RelocAddr<uintptr_t>(0xD69DCF);
+			SDT::DMisc::FixStuttering2Address = RelocAddr<uintptr_t>(0x1D6EB45);
+			SDT::DMisc::FixStuttering3Address = RelocAddr<uintptr_t>(0x14D58A0);
+			SDT::DMisc::FixWhiteScreenAddress = RelocAddr<uintptr_t>(0x172A893);
+			SDT::DMisc::FixWindSpeed1Address = RelocAddr<uintptr_t>(0x1DCF701);
+			SDT::DMisc::FixWindSpeed2Address = RelocAddr<uintptr_t>(0x1D6F84E);
+			SDT::DMisc::FixRotationSpeedAddress = RelocAddr<uintptr_t>(0xF49621);
+			SDT::DMisc::FixLockpickRotationAddress = RelocAddr<uintptr_t>(0x129CA32);
+			SDT::DMisc::FixWSRotationSpeedAddress = RelocAddr<uintptr_t>(0x2182B2);
+			SDT::DMisc::FixRepeateRateAddress = RelocAddr<uintptr_t>(0x1297474);
+			SDT::DMisc::FixStuckAnimAddress = RelocAddr<uintptr_t>(0x252E789);
+			SDT::DMisc::FixMotionFeedBackAddress = RelocAddr<uintptr_t>(0x2844F0);
+			SDT::DMisc::SittingRotationSpeedXAddress = RelocAddr<uintptr_t>(0x3804738);
+			SDT::DMisc::FixSittingRotationXAddress = RelocAddr<uintptr_t>(0x12446D0);
+			SDT::DMisc::CalculateOCBP1Address = RelocAddr<uintptr_t>(0xBC93D0);
+			SDT::DRender::ExteriorInteriorAddress = RelocAddr<uintptr_t>(0x38C4177);
 			int result = LoadConfiguration();
 			if (result != 0) {
 				_MESSAGE("Unable to load HighFPSPhysicsFix.ini file. Line: (%d)", result);
@@ -260,14 +306,6 @@ extern "C"
 
 	bool F4SEPlugin_Load(const F4SEInterface* f4se) {
 
-		RelocAddr<uintptr_t> BethesdaVsyncAddress(0x1D17792);
-		RelocAddr<uintptr_t> BethesdaFPSCap1Address(0xD423BA);
-		RelocAddr<uintptr_t> BethesdaFPSCap2Address(0xD423C3);
-		SafeWriteBuf(BethesdaVsyncAddress.GetUIntPtr(), "\x90\x90\x90\x90", 4);
-		//SafeWriteBuf(RelocAddr<uintptr_t>(0x17704DB).GetUIntPtr(), "\xC3\x90\x90\x90\x90", 5);
-		uint32_t maxrefreshrate = 10000;
-		SafeWriteBuf(BethesdaFPSCap1Address.GetUIntPtr(), &maxrefreshrate, sizeof(maxrefreshrate));
-		SafeWriteBuf(BethesdaFPSCap2Address.GetUIntPtr(), &maxrefreshrate, sizeof(maxrefreshrate));
 		ASSERT(SDT::IF4SE::GetSingleton().ModuleHandle() != nullptr);
 
 		g_messaging->RegisterListener(g_pluginHandle, "F4SE", onF4SEMessage);

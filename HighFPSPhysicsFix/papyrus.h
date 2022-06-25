@@ -25,6 +25,9 @@ namespace SDT
             static inline bool stats_enabled;
             bool warn_overstressed;
         }static inline m_conf;
+
+        static inline uintptr_t UpdateBudgetGame;
+
     private:
         DPapyrus();
 
@@ -48,7 +51,7 @@ namespace SDT
         float m_t_min;
 
         wchar_t m_bufStats1[64];
-
+        static inline uintptr_t UpdateBudgetUI;
         DOSD* m_OSDDriver;
 
         StatsCounter m_stats_counter;

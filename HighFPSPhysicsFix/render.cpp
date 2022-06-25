@@ -1,28 +1,6 @@
 #include "pch.h"
 #include <DirectXTK\Src\PlatformHelpers.h>
 #include "FramerateLimiter.h"
-RelocAddr<uintptr_t> D3D11CreateDeviceAndSwapChainAddress(0x1D17879); //E8 7007C200          4C 8B 05 FB463804    8B 0D 29CFA104       49 8D 50 58          BF 180B0000          48 89 15 F5463804
-RelocAddr<uintptr_t> ResizeTargetAddress(0x1D0AFA9); //48 8D 54 24 50       48 8B 01             FF 50 70             48 8B 4B 68          FF 15 2AD1F000
-RelocAddr<uintptr_t> ResizeBuffersInjectAddress(0x1D0ADA0); //45 33 C9             48 8B 01             45 33 C0             33 D2                C7 44 24 28 02000000 C7 44 24 20 00000000 FF 50 68             8B 8C 24 88000000    E8 16CE0000
-RelocAddr<uintptr_t> MovRaxRcxAddress(0x1D0ADB5); //24 20                00 00                00 00                FF 50 68             8B 8C 24 88000000    E8 16CE0000          48 8D 0D 5F4FB401    E8 AA7F0200          48 8B 05 0B5FB401
-RelocAddr<uintptr_t> BethesdaFPSCap1Address(0xD423BA); //3C 00                00 00                EB 0D                33 D2                B8 3C000000          F7 F1                89 44 24 30          33 C0                48 8D 0D 2AE54905
-RelocAddr<uintptr_t> BethesdaFPSCap2Address(0xD423C3); //3C 00                00 00                F7 F1                89 44 24 30          33 C0                48 8D 0D 2AE54905
-RelocAddr<uintptr_t> BorderlessAddress(0xD4236C); //0FB6 05 FDD8B002     85 C9                88 44 24 35          8B 05 79D8B002       0F95 44 24 36
-RelocAddr<uintptr_t> FullscreenAddress(0xD42361); //0FB6 05 F0D8B002     88 44 24 34          0FB6 05 FDD8B002     85 C9                88 44 24 35
-RelocAddr<uintptr_t> FullscreenAddress1(0xCAAC70);
-RelocAddr<uintptr_t> FullscreenAddress11(0xCAAC73);
-RelocAddr<uintptr_t> FullscreenAddress2(0xCAACA1);
-RelocAddr<uintptr_t> ResizeBuffersDisableAddress(0x1D0AC27); //0F84 45020000        48 8B 4F 68          48 8D 54 24 30       48 89 6C 24 58       4C 89 74 24 40
-RelocAddr<uintptr_t> ResizeTargetDisableAddress(0x1D0AEB5); //0F84 4E010000        48 8B 4B 68          48 8D 54 24 40       48 89 B4 24 D0000000
-RelocAddr<uintptr_t> CreateDXGIFactoryAddress(0x1D1748B); //E8 640BC200          48 8B 4C 24 60       48 8B 05 E44A3804    33 F6                4C 8D 85 B0010000    48 89 B5 B0010000
-RelocAddr<uintptr_t> PresentAddress(0x1D0B6B8); //8B 50 40             41 FF 51 40          83 3D 66698304 08    75 38                3D 0A007A88
-RelocAddr<uintptr_t> UntieAddress(0x1B1393B); //08 00                00 00                48 8B C1             48 3B CA             48 0F42 C2           0F57 C0              F3 48 0F2A C0
-RelocAddr<uintptr_t> iFPSClampAddress(0x1B138E8); //08 0F                57                   C0 0F 2E             D0 74 38 0F          28 CA                F3 0F59 15 98781301
-RelocAddr<uintptr_t> BlackLoadingScreensAddress(0x1297076); //75 1E                40 38 BB 78020000    75 2E                48 8B 46 20          48 89 83 E0000000    0FB6 46 28           88 83 70020000       
-RelocAddr<uintptr_t> LoadingScreensAddress(0xCBFFCD); //83 7F 68 02          0F84 A9FEFFFF        33 C9                E8 3287E800          89 1C 2E             48 8B 5C 24 30
-RelocAddr<uintptr_t> FrametimeAddress(0x5A66FE8);
-RelocAddr<uintptr_t> PostLoadInjectAddress(0x126D75B); //F3 0F10 05 71DF8E04  48 8B 53 30          48 8B 4B 20
-RelocAddr<uintptr_t> LoadScreenPlusLimiterAddress(0x1D0B67E);
 
 using namespace Microsoft::WRL;
 namespace SDT
@@ -88,6 +66,8 @@ namespace SDT
 
     static constexpr const char* SECTION_LIMIT = "Limiter";
     static constexpr const char* CONF_INGAMEFPS = "InGameFPS";
+    static constexpr const char* CONF_EXTERIORFPS = "ExteriorFPS";
+    static constexpr const char* CONF_INTERIORFPS = "InteriorFPS";
     static constexpr const char* CONF_UILOADINGFPS = "LoadingScreenFPS";
     static constexpr const char* CONF_UILOCKFPS = "LockpickingFPS";
     static constexpr const char* CONF_UIPIPFPS = "PipBoyFPS";
@@ -120,7 +100,7 @@ namespace SDT
         has_swap_effect(false),
         limiter_installed(false),
         has_fl_override(false),
-        fps_limit(-1),
+        //fps_limit(-1),
         lslExtraTime(0),
         lslPostLoadExtraTime(0),
         gameLoadState(0),
@@ -157,8 +137,9 @@ namespace SDT
 
     void DRender::LoadConfig()
     {
+        ft4handle = (DWORD_PTR)GetModuleHandle("fallout4.exe");
         IConfigGame gameConfig(FALLOUT4_PREFS_INI_FILE);
-        
+
         m_conf.untie = GetConfigValueBool("Main", "UntieSpeedFromFPS", true);
         m_conf.disable_clamp = GetConfigValueBool(SECTION_MAIN, CONF_DISABLEIFPSCLAMP, true);
         m_conf.vsync_on = GetConfigValueBool(SECTION_MAIN, CONF_VSYNC, true);
@@ -193,7 +174,9 @@ namespace SDT
             m_conf.buffer_count = std::clamp<std::int32_t>(m_conf.buffer_count, 0, 8);
         }
         m_conf.limit_mode = std::clamp<std::uint8_t>(GetConfigValue<std::uint8_t>(SECTION_LIMIT, CONF_FPSLIMIT_MODE, 0), 0, 1);
-        m_conf.limits.game = GetConfigValueFloat (SECTION_LIMIT, CONF_INGAMEFPS, -1.0f);
+        m_conf.limits.game = GetConfigValueFloat(SECTION_LIMIT, CONF_INGAMEFPS, -1.0f);
+        m_conf.limits.exterior = GetConfigValueFloat(SECTION_LIMIT, CONF_EXTERIORFPS, -1.0f);
+        m_conf.limits.interior = GetConfigValueFloat(SECTION_LIMIT, CONF_INTERIORFPS, -1.0f);
         m_conf.limits.ui_loadscreen = GetConfigValueFloat(SECTION_LIMIT, CONF_UILOADINGFPS, -1.0f);
         m_conf.limits.ui_lockpick = GetConfigValueFloat(SECTION_LIMIT, CONF_UILOCKFPS, -1.0f);
         m_conf.limits.ui_pipboy = GetConfigValueFloat(SECTION_LIMIT, CONF_UIPIPFPS, -1.0f);
@@ -230,97 +213,102 @@ namespace SDT
                 _MESSAGE("[Render] Borderless upscaling enabled");
             }
         }
-
+        if (m_conf.limits.exterior > 0.0f) {
+            ext_fps = static_cast<long long>((1.0L / static_cast<long double>(m_conf.limits.exterior)) * 1000000.0L);
+            _MESSAGE("[Limiter] Framerate limit (exterior): %.6g", m_conf.limits.exterior);
+        }
+        if (m_conf.limits.interior > 0.0f) {
+            int_fps = fps_max = static_cast<long long>((1.0L / static_cast<long double>(m_conf.limits.interior)) * 1000000.0L);
+            _MESSAGE("[Limiter] Framerate limit (interior): %.6g", m_conf.limits.interior);
+        }
         if (m_conf.limits.game > 0.0f) {
             current_fps_max = fps_max = static_cast<long long>((1.0L / static_cast<long double>(m_conf.limits.game)) * 1000000.0L);
-            //fps60 = static_cast<long long>((1.0L / static_cast<long double>(60)) * 1000000.0L); //Home клавиша!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-            fps_limit = 1;
+            _MESSAGE("[Limiter] Framerate limit (game): %.6g", m_conf.limits.game);
         }
-        else if (m_conf.limits.game == 0.0f) {
-            fps_limit = 0;
-        }
-        else {
-            fps_limit = -1;
-        }
-        fps60 = static_cast<long long>((1.0L / 60L) * 1000000.0L); //ТЕСТ
+        //fps60 = static_cast<long long>((1.0L / 60L) * 1000000.0L); //TEST
         if (m_conf.limits.ui_loadscreen > 0.0f) {
-                loading_fps = static_cast<long long>((1.0L / static_cast<long double>(m_conf.limits.ui_loadscreen)) * 1000000.0L);
+            loading_fps = static_cast<long long>((1.0L / static_cast<long double>(m_conf.limits.ui_loadscreen)) * 1000000.0L);
+            _MESSAGE("[Limiter] Framerate limit (loading): %.6g", m_conf.limits.ui_loadscreen);
         }
         if (m_conf.limits.ui_lockpick > 0.0f) {
             lockpick_fps = static_cast<long long>((1.0L / static_cast<long double>(m_conf.limits.ui_lockpick)) * 1000000.0L);
+            _MESSAGE("[Limiter] Framerate limit (lockpicking): %.6g", m_conf.limits.ui_lockpick);
         }
         if (m_conf.limits.ui_pipboy > 0.0f) {
             pipboy_fps = static_cast<long long>((1.0L / static_cast<long double>(m_conf.limits.ui_pipboy)) * 1000000.0L);
+            _MESSAGE("[Limiter] Framerate limit (pipboy): %.6g", m_conf.limits.ui_pipboy);
         }
     }
 
     void DRender::Patch()
     {
-        std::uint32_t maxrefreshrate = 10000;
-        safe_write(
-            BethesdaFPSCap1Address, 
-            static_cast<std::uint32_t>(maxrefreshrate)
+        Game::g_frameTimer = reinterpret_cast<const float*>(SDT::DRender::FrametimeAddress);
+        uintptr_t BethesdaVsyncAddress = CreateDXGIFactoryAddress + 0x307;
+        SafeWriteBuf(BethesdaVsyncAddress, "\x90\x90\x90\x90", 4);
+        safe_write( //FPSCap1 D423BA
+            ScreenAddress + 0xAA,
+            static_cast<std::uint32_t>(10000)
         );
-        safe_write(
-            BethesdaFPSCap2Address,
-            static_cast<std::uint32_t>(maxrefreshrate)
+        safe_write( //FPSCap2 D423C3
+            ScreenAddress + 0xB3,
+            static_cast<std::uint32_t>(10000)
         );
-        safe_write(
-            BorderlessAddress,
+        safe_write( //Borderless1 D4236C
+            ScreenAddress + 0x5C,
             reinterpret_cast<const void*>(Payloads::screen_patch),
             sizeof(Payloads::screen_patch)
         );
-        safe_write(
-            BorderlessAddress + 0x1,
+        safe_write( //Borderless2 +1
+            ScreenAddress + 0x5D,
             static_cast<std::uint32_t>(m_Instance.m_conf.borderless)
         );
-        safe_write(
-            FullscreenAddress1,
+        safe_write( //CAAC70
+            FullScreenAddress + 0xD0,
             reinterpret_cast<const void*>(Payloads::fullscreen1_patch),
             sizeof(Payloads::fullscreen1_patch)
         );
-        safe_write(
-            FullscreenAddress1 + 0x3,
+        safe_write( //CAAC73
+            FullScreenAddress + 0xD3,
             static_cast<std::uint32_t>(m_Instance.m_conf.fullscreen)
         );
-        safe_write(
-            FullscreenAddress1 + 0x4,
+        safe_write( //+4
+            FullScreenAddress + 0xD4,
             reinterpret_cast<const void*>(Payloads::fullscreenNOP_patch),
             sizeof(Payloads::fullscreenNOP_patch)
         );
-        if (m_conf.fullscreen) {
+        if (m_conf.fullscreen) { //CAACA1
             safe_write(
-                FullscreenAddress2,
+                FullScreenAddress + 0x101,
                 reinterpret_cast<const void*>(Payloads::fullscreenJMP_patch),
                 sizeof(Payloads::fullscreenJMP_patch)
             );
         }
-        else {
+        else { //CAACA1
             safe_write(
-                FullscreenAddress2,
+                FullScreenAddress + 0x101,
                 reinterpret_cast<const void*>(Payloads::fullscreenNOP_patch),
                 sizeof(Payloads::fullscreenNOP_patch)
             );
         }
         safe_write(
-            FullscreenAddress,
+            ScreenAddress + 0x51, //D42361
             reinterpret_cast<const void*>(Payloads::screen_patch),
             sizeof(Payloads::screen_patch)
         );
         safe_write(
-            FullscreenAddress + 0x1,
+            ScreenAddress + 0x52, //D42362
             static_cast<std::uint32_t>(m_Instance.m_conf.fullscreen)
         );
         if (m_conf.untie) {
             safe_write(
-                UntieAddress,
+                FPSAddress + 0x6B, //1B1393B
                 reinterpret_cast<const void*>(Payloads::untie_patch),
                 sizeof(Payloads::untie_patch)
             );
         }
         if (m_conf.disable_clamp) {
             safe_write(
-                iFPSClampAddress,
+                FPSAddress + 0x18, //1B138E8
                 reinterpret_cast<const void*>(Payloads::ifpsclamp_patch),
                 sizeof(Payloads::ifpsclamp_patch)
             );
@@ -339,14 +327,6 @@ namespace SDT
                 sizeof(Payloads::disable_loading_patch)
             );
         }
-        safe_write(
-            BethesdaFPSCap1Address,
-            static_cast<std::uint32_t>(10000)
-        );
-        safe_write(
-            BethesdaFPSCap2Address,
-            static_cast<std::uint32_t>(10000)
-        );
         if (m_conf.postloading_speed != 1.0f) {
             {
                 struct PostLoadPatch : JITASM::JITASM {
@@ -382,7 +362,7 @@ namespace SDT
                 safe_memset(PostLoadInjectAddress + 0x5, 0x90, 0x3);
             }
         }
-        if (m_conf.limits.ui_loadscreen > 0.0f || m_conf.limits.ui_loadscreen > 0.0f || m_conf.limits.ui_lockpick > 0.0f || m_conf.limits.ui_pipboy > 0.0f)
+        if (m_conf.limits.ui_loadscreen > 0.0f || m_conf.limits.ui_loadscreen > 0.0f || m_conf.limits.ui_lockpick > 0.0f || m_conf.limits.ui_pipboy > 0.0f || m_conf.limits.exterior > 0.0f || m_conf.limits.interior > 0.0f)
         {
             limiter_installed = true;
 
@@ -413,7 +393,7 @@ namespace SDT
 
             if (m_conf.disabletargetresize) {
                 safe_write(
-                    ResizeTargetDisableAddress,
+                    ResizeBuffersDisableAddress + 0x28E, //1D0AEB5
                     reinterpret_cast<const void*>(Payloads::ResizeTargetDisable),
                     sizeof(Payloads::ResizeTargetDisable)
                 );
@@ -422,6 +402,7 @@ namespace SDT
             }
         }
         else {
+            uintptr_t ResizeTargetAddress = ResizeBuffersDisableAddress + 0x382;
             struct ResizeTargetInjectArgs : JITASM::JITASM {
                 ResizeTargetInjectArgs(std::uintptr_t retnAddr, std::uintptr_t mdescAddr
                 ) : JITASM(IF4SE::GetLocalTrampoline())
@@ -440,7 +421,6 @@ namespace SDT
                     dq(mdescAddr);
                 }
             };
-
             _MESSAGE("[IDXGISwapChain::ResizeTarget] patching...");
             {
                 ResizeTargetInjectArgs code(
@@ -452,7 +432,7 @@ namespace SDT
             }
             _MESSAGE("[IDXGISwapChain::ResizeTarget] OK");
         }
-
+        uintptr_t ResizeBuffersInjectAddress = ResizeBuffersDisableAddress + 0x179;
         {
             struct ResizeBuffersInjectArgs : JITASM::JITASM {
                 ResizeBuffersInjectArgs(std::uintptr_t retnAddr, std::uintptr_t swdAddr
@@ -492,6 +472,7 @@ namespace SDT
                 safe_memset(ResizeBuffersInjectAddress + 0x6, 0xCC, 0x12);
             }
         }
+        uintptr_t MovRaxRcxAddress = ResizeBuffersDisableAddress + 0x18E;
         {
             struct PatchRax : JITASM::JITASM {
                 PatchRax(std::uintptr_t retnAddr
@@ -524,12 +505,12 @@ namespace SDT
             reinterpret_cast<std::uintptr_t>(CreateDXGIFactory_Hook),
             m_createDXGIFactory_O))
         {
-            _MESSAGE("[Render] CreateDXGIFactory hook failed");
+            _MESSAGE("Here's a pointer for you: %f", CreateDXGIFactoryAddress);
         }
 
         if (!Hook::Call5(
             IF4SE::GetBranchTrampoline(),
-            D3D11CreateDeviceAndSwapChainAddress,
+            CreateDXGIFactoryAddress + 0x3EE, //1D17879
             reinterpret_cast<std::uintptr_t>(D3D11CreateDeviceAndSwapChain_Hook),
             m_D3D11CreateDeviceAndSwapChain_O))
         {
@@ -548,11 +529,12 @@ namespace SDT
 
     void DRender::PostInit()
     {
+        uintptr_t LoadScreenPlusLimiterAddress = ResizeBuffersDisableAddress + 0xA57;
+        uintptr_t PresentAddress = LoadScreenPlusLimiterAddress + 0x3A;
         if (m_conf.limits.ui_loadscreen > 0.0f && m_conf.fixcputhreads) {
             timing = IPerfCounter::Query();
             IF4SE::GetBranchTrampoline().Write5Call(LoadScreenPlusLimiterAddress, std::uintptr_t(LimiterFunc));
         }
-
         struct PresentHook : JITASM::JITASM {
             PresentHook(std::uintptr_t targetAddr
             ) : JITASM(IF4SE::GetLocalTrampoline())
@@ -688,24 +670,24 @@ namespace SDT
             pSwapChainDesc->BufferDesc.RefreshRate.Denominator;
     }
 
-    float DRender::GetMaxFramerate(const DXGI_SWAP_CHAIN_DESC* pSwapChainDesc) const
-    {
-        float maxt = 0.0f;
+    //float DRender::GetMaxFramerate(const DXGI_SWAP_CHAIN_DESC* pSwapChainDesc) const
+    //{
+    //    float maxt = 0.0f;
 
-        if (m_conf.vsync_on && pSwapChainDesc->Windowed == FALSE) {
-            maxt = static_cast<float>(GetRefreshRate(pSwapChainDesc));
-        }
+    //    if (m_conf.vsync_on && pSwapChainDesc->Windowed == FALSE) {
+    //        maxt = static_cast<float>(GetRefreshRate(pSwapChainDesc));
+    //    }
 
-        if (fps_limit == 1) {
-            if (!(m_conf.vsync_on && pSwapChainDesc->Windowed == FALSE) ||
-                m_conf.limits.game < maxt)
-            {
-                maxt = m_conf.limits.game;
-            }
-        }
+    //    if (fps_limit == 1) {
+    //        if (!(m_conf.vsync_on && pSwapChainDesc->Windowed == FALSE) ||
+    //            m_conf.limits.game < maxt)
+    //        {
+    //            maxt = m_conf.limits.game;
+    //        }
+    //    }
 
-        return maxt;
-    }
+    //    return maxt;
+    //}
 
     DXGI_SWAP_EFFECT DRender::AutoGetSwapEffect(const DXGI_SWAP_CHAIN_DESC* pSwapChainDesc) const
     {

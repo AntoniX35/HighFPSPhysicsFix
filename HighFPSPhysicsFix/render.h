@@ -39,7 +39,17 @@ namespace SDT
         typedef void (*presentCallback_t)(IDXGISwapChain* pSwapChain);
 
     public:
-        static inline DWORD_PTR f4handle, exteriorinterior;
+        static inline bool ReadMemory(uintptr_t addr, void* data, size_t len) {
+            UInt32 oldProtect;
+            if (VirtualProtect((void*)addr, len, PAGE_EXECUTE_READWRITE, &oldProtect)) {
+                memcpy(data, (void*)addr, len);
+                if (VirtualProtect((void*)addr, len, oldProtect, &oldProtect))
+                    return true;
+            }
+            return false;
+        }
+        static inline DWORD_PTR ft4handle;
+        static inline uintptr_t ExteriorInteriorAddress, FrametimeAddress, ScreenAddress, FullScreenAddress, ResizeBuffersDisableAddress, CreateDXGIFactoryAddress, FPSAddress, BlackLoadingScreensAddress, LoadingScreensAddress, PostLoadInjectAddress;
         static inline constexpr auto ID = DRIVER_ID::RENDER;
 
         static inline bool tearing_enabled = false;
@@ -50,8 +60,7 @@ namespace SDT
         typedef void(*RTProcR) (void);
         typedef void(*PhysCalcR) (void*, std::int32_t);
 
-        static inline long long current_fps_max, oo_current_fps_max, oo_expire_time, fps_max, loading_fps, lockpick_fps, pipboy_fps, ext_fps, int_fps, fps60 = 0; //fps60 - реяр
-        static inline uintptr_t g_CodeBase, g_CodeEnd, FrametimeAddress;
+        static inline long long current_fps_max, oo_current_fps_max, oo_expire_time, fps_max, loading_fps, lockpick_fps, pipboy_fps, ext_fps, int_fps = 0; //fps60 - TEST
 
         struct
         {
@@ -82,7 +91,8 @@ namespace SDT
 
             struct {
                 float game;
-
+                float exterior;
+                float interior;
                 float ui;
                 float ui_loadscreen;
                 float ui_pipboy;
@@ -120,7 +130,7 @@ namespace SDT
             bool fixcputhreads;
         } static inline m_conf;
 
-        [[nodiscard]] float GetMaxFramerate(const DXGI_SWAP_CHAIN_DESC* pSwapChainDesc) const;
+        //[[nodiscard]] float GetMaxFramerate(const DXGI_SWAP_CHAIN_DESC* pSwapChainDesc) const;
         [[nodiscard]] bool IsLimiterInstalled() { return limiter_installed; }
 
         [[nodiscard]] bool QueryVideoMemoryInfo(

@@ -3,11 +3,6 @@ using namespace Patching;
 
 namespace SDT
 {
-    RelocAddr<uintptr_t> CreateWindowExAddress(0x1D17F97); //FF 15 A301F000       48 8B 0D DC3F3804    48 89 41 58          48 8B 0D D13F3804    BA 05000000          48 8B 49 58
-    RelocAddr<uintptr_t> GetClientRect1Address(0x1D0B5DE); //FF 15 2CCCF000       8B 44 24 2C          48 8D 54 24 30       89 44 24 34          8B 44 24 28
-    RelocAddr<uintptr_t> WriteiLocationX(0xD403F9); //FF 15 916DED01       44 8B 4F 14          4C 8D 05 82BDF001    48 8D 8D 90000000    BA 04010000
-    RelocAddr<uintptr_t> WriteiLocationY(0xD40434); //FF 15 566DED01
-
     static constexpr const char* SECTION_WINDOW = "Window";
     static constexpr const char* CONF_GHOSTING = "DisableProcessWindowsGhosting";
     static constexpr const char* CONF_LOCKCURSOR = "LockCursor";
@@ -140,6 +135,8 @@ namespace SDT
 
     void DWindow::RegisterHooks()
     {
+        uintptr_t CreateWindowExAddress = DRender::CreateDXGIFactoryAddress + 0xB0C;
+        uintptr_t GetClientRect1Address = DRender::ResizeBuffersDisableAddress + 0x9B7;
         if (m_mp.HasProcessors() || m_conf.upscale || m_conf.center_window)
         {
             if (!Hook::Call6(
@@ -352,6 +349,7 @@ namespace SDT
         }
 
         if (m_Instance.m_conf.center_window) {
+            uintptr_t WriteiLocationY = WriteiLocationX + 0x3B;
             safe_memset(WriteiLocationX, 0x90, 0x6);
             safe_memset(WriteiLocationY, 0x90, 0x6);
             m_Instance.DoCenter(hWnd, X, Y, nWidth, nHeight);
