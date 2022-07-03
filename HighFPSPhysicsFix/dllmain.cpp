@@ -2,7 +2,6 @@
 
 #include "WinAPI.h"
 
-float extint;
 bool comboKeyDown = false;
 F4SEScaleformInterface* g_scaleform = NULL;
 F4SEMessagingInterface* g_messaging = NULL;
@@ -28,9 +27,9 @@ EventResult	MenuOpenCloseHandler::ReceiveEvent(MenuOpenCloseEvent* evn, void* di
 	{
 		if (evn->isOpen)
 		{
+			SDT::DOSD::loading = true;
 			SDT::DRender::current_fps_max = SDT::DRender::loading_fps;
 			if (SDT::DOSD::m_conf.loading_time || SDT::DOSD::m_conf.bare_loading_time) {
-				SDT::DOSD::loading = true;
 				SDT::DOSD::m_stats.start = clock();
 			}
 			if (SDT::DRender::m_conf.vsync_on && SDT::DRender::m_conf.disable_vsync) {
@@ -45,7 +44,6 @@ EventResult	MenuOpenCloseHandler::ReceiveEvent(MenuOpenCloseEvent* evn, void* di
 			if (SDT::DOSD::m_conf.loading_time || SDT::DOSD::m_conf.bare_loading_time) {
 				SDT::DOSD::m_stats.end = clock();
 				SDT::DOSD::last = true;
-				SDT::DOSD::loading = false;
 			}
 			if (SDT::DRender::m_conf.vsync_on && SDT::DRender::m_conf.disable_vsync) {
 				SDT::DRender::m_current_vsync_present_interval = SDT::DRender::m_vsync_present_interval;
@@ -53,31 +51,22 @@ EventResult	MenuOpenCloseHandler::ReceiveEvent(MenuOpenCloseEvent* evn, void* di
 					SDT::DRender::m_present_flags &= ~DXGI_PRESENT_ALLOW_TEARING;
 				}
 			}
-			if (SDT::DRender::ext_fps > 0 || SDT::DRender::int_fps > 0) {
-				SDT::DRender::ReadMemory(SDT::DRender::ExteriorInteriorAddress, &extint, sizeof(float));
-				if (extint == 0.0f) {
-					SDT::DRender::current_fps_max = SDT::DRender::fps_max = SDT::DRender::ext_fps;
-				}
-				else {
-					SDT::DRender::current_fps_max = SDT::DRender::fps_max = SDT::DRender::int_fps;
-				}
-			}
-			else {
-				SDT::DRender::current_fps_max = SDT::DRender::fps_max;
-			}
+			SDT::DRender::current_fps_max = SDT::DRender::fps_max;
+			SDT::DOSD::loading = false;
 		}
 	}
 	if (SDT::DRender::lockpick_fps > 0) {
 		if (!_strcmpi("LockpickingMenu", evn->menuName.c_str())\
 			)
 		{
-			if (evn->isOpen)
-			{
+			if (evn->isOpen) {
+				SDT::DRender::lockpicking = true;
 				SDT::DRender::current_fps_max = SDT::DRender::lockpick_fps;
 			}
 			else
 			{
 				SDT::DRender::current_fps_max = SDT::DRender::fps_max;
+				SDT::DRender::lockpicking = false;
 			}
 		}
 	}
@@ -87,11 +76,13 @@ EventResult	MenuOpenCloseHandler::ReceiveEvent(MenuOpenCloseEvent* evn, void* di
 		{
 			if (evn->isOpen)
 			{
+				SDT::DRender::pipboy = true;
 				SDT::DRender::current_fps_max = SDT::DRender::pipboy_fps;
 			}
 			else
 			{
 				SDT::DRender::current_fps_max = SDT::DRender::fps_max;
+				SDT::DRender::pipboy = false;
 			}
 		}
 	}
@@ -226,7 +217,7 @@ namespace SDT
 			SDT::DMisc::ReturnThreadsNGJMPAddress = RelocAddr<uintptr_t>(0xC8ED70);
 			SDT::DMisc::FixCPUThreadsJMP1Address = RelocAddr<uintptr_t>(0xE9B7E1);
 			SDT::DMisc::FixCPUThreadsJMP2Address = RelocAddr<uintptr_t>(0xD69DCF);
-			SDT::DMisc::FixStuttering2Address = RelocAddr<uintptr_t>(0x1D6EB45);
+			SDT::DMisc::FixStuttering2Address = RelocAddr<uintptr_t>(0x1D6EB45); 
 			SDT::DMisc::FixStuttering3Address = RelocAddr<uintptr_t>(0x14D58A0);
 			SDT::DMisc::FixWhiteScreenAddress = RelocAddr<uintptr_t>(0x172A893);
 			SDT::DMisc::FixWindSpeed1Address = RelocAddr<uintptr_t>(0x1DCF701);
@@ -240,7 +231,8 @@ namespace SDT
 			SDT::DMisc::SittingRotationSpeedXAddress = RelocAddr<uintptr_t>(0x3804738);
 			SDT::DMisc::FixSittingRotationXAddress = RelocAddr<uintptr_t>(0x12446D0);
 			SDT::DMisc::CalculateOCBP1Address = RelocAddr<uintptr_t>(0xBC93D0);
-			SDT::DRender::ExteriorInteriorAddress = RelocAddr<uintptr_t>(0x38C4177);
+			SDT::DRender::DetectLoadAddress = RelocAddr<uintptr_t>(0x7FA780);
+			SDT::DRender::ExteriorInteriorAddress = RelocAddr<uintptr_t>(0x3792038);
 			int result = LoadConfiguration();
 			if (result != 0) {
 				_MESSAGE("Unable to load HighFPSPhysicsFix.ini file. Line: (%d)", result);

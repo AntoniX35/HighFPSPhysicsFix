@@ -4,8 +4,8 @@
 //-----------------------
 // Plugin Information
 //-----------------------
-#define PLUGIN_VERSION              15
-#define PLUGIN_VERSION_STRING       "0.8.5"
+#define PLUGIN_VERSION              16
+#define PLUGIN_VERSION_STRING       "0.8.6"
 #define PLUGIN_NAME_SHORT           "HighFPSPhysicsFix"
 #define PLUGIN_NAME_LONG            "High FPS Physics Fix"
 #define SUPPORTED_RUNTIME_VERSION   CURRENT_RELEASE_RUNTIME

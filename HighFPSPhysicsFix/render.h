@@ -49,7 +49,7 @@ namespace SDT
             return false;
         }
         static inline DWORD_PTR ft4handle;
-        static inline uintptr_t ExteriorInteriorAddress, FrametimeAddress, ScreenAddress, FullScreenAddress, ResizeBuffersDisableAddress, CreateDXGIFactoryAddress, FPSAddress, BlackLoadingScreensAddress, LoadingScreensAddress, PostLoadInjectAddress;
+        static inline uintptr_t ExteriorInteriorAddress, FrametimeAddress, ScreenAddress, FullScreenAddress, ResizeBuffersDisableAddress, CreateDXGIFactoryAddress, FPSAddress, BlackLoadingScreensAddress, LoadingScreensAddress, PostLoadInjectAddress, DetectLoadAddress;
         static inline constexpr auto ID = DRIVER_ID::RENDER;
 
         static inline bool tearing_enabled = false;
@@ -61,6 +61,8 @@ namespace SDT
         typedef void(*PhysCalcR) (void*, std::int32_t);
 
         static inline long long current_fps_max, oo_current_fps_max, oo_expire_time, fps_max, loading_fps, lockpick_fps, pipboy_fps, ext_fps, int_fps = 0; //fps60 - TEST
+
+        static inline bool once, lockpicking, intextlimits, pipboy;
 
         struct
         {

@@ -466,7 +466,6 @@ namespace SDT
         ::_snwprintf_s(m_Instance.m_bufStats1, _TRUNCATE,
             L"FPS: %.1Lf",
             1.0L / (m_Instance.m_stats.cur.frametime / 1000000.0L));
-
         return m_Instance.m_bufStats1;
     }
 
@@ -534,7 +533,7 @@ namespace SDT
             if (m_conf.bare_loading_time) {
                 ::_snwprintf_s(m_Instance.m_bufStats5, _TRUNCATE, L"\n%.2f", ((double)m_stats.end - m_stats.start) / ((double)CLOCKS_PER_SEC));
             }
-            }
+        }
         else if (last)
         {
             if (m_conf.loading_time) {

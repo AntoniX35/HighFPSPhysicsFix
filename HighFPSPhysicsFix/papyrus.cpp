@@ -130,7 +130,6 @@ namespace SDT
         interval = m_Instance.m_lastInterval * m_Instance.m_bmult;
 
         *m_Instance.m_gv.fUpdateBudgetMS = interval;
-
         return interval;
     }
 

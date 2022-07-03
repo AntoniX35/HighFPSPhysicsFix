@@ -221,6 +221,9 @@ namespace SDT
             int_fps = fps_max = static_cast<long long>((1.0L / static_cast<long double>(m_conf.limits.interior)) * 1000000.0L);
             _MESSAGE("[Limiter] Framerate limit (interior): %.6g", m_conf.limits.interior);
         }
+        if (m_conf.limits.exterior > 0.0f || m_conf.limits.interior > 0.0f) {
+            intextlimits = true;
+        }
         if (m_conf.limits.game > 0.0f) {
             current_fps_max = fps_max = static_cast<long long>((1.0L / static_cast<long double>(m_conf.limits.game)) * 1000000.0L);
             _MESSAGE("[Limiter] Framerate limit (game): %.6g", m_conf.limits.game);
@@ -242,6 +245,7 @@ namespace SDT
 
     void DRender::Patch()
     {
+        Game::g_extInt = reinterpret_cast<const int*>(SDT::DRender::ExteriorInteriorAddress);
         Game::g_frameTimer = reinterpret_cast<const float*>(SDT::DRender::FrametimeAddress);
         uintptr_t BethesdaVsyncAddress = CreateDXGIFactoryAddress + 0x307;
         SafeWriteBuf(BethesdaVsyncAddress, "\x90\x90\x90\x90", 4);
@@ -379,7 +383,6 @@ namespace SDT
 
             _MESSAGE("[Render] Framerate limiter installed, mode: %s", m_conf.limit_mode == 0 ? "pre" : "post");
         }
-
         if (!m_conf.fullscreen)
         {
             if (m_conf.disablebufferresize) {
@@ -568,7 +571,7 @@ namespace SDT
     }
 
     bool DRender::Prepare()
-    {  
+    {
         return true;
     }
 
@@ -643,6 +646,15 @@ namespace SDT
 
     void DRender::Throttle(IDXGISwapChain*)
     {
+        if (intextlimits && !DOSD::loading && !lockpicking && !pipboy) {
+            int value = *Game::g_extInt;
+            if (value == 0) {
+                current_fps_max = fps_max = ext_fps;
+            }
+            else {
+                current_fps_max = fps_max = int_fps;
+            }
+        }
         m_Instance.m_afTasks.ProcessTasks();
 
         auto limit = GetCurrentFramerateLimit();
@@ -1064,5 +1076,4 @@ namespace SDT
             return false;
         }
     }
-
 }
