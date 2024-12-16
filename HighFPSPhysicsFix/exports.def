@@ -1,4 +1,0 @@
-LIBRARY HighFPSPhysicsFix
-EXPORTS
-F4SEPlugin_Load
-F4SEPlugin_Query

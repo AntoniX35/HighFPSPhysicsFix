@@ -1,0 +1,23 @@
+set(headers ${headers}
+	include/PCH.h
+	include/ext/IErrors.h
+	include/ext/PerfCounter.h
+	include/ext/INIReader.h
+	include/getconfig.h
+	include/drv_ids.h
+	include/drv_base.h
+	include/dispatcher.h
+	include/data.h
+	include/ext/ID3D11.h
+	include/config.h
+	include/helpers.h
+	include/common.h
+	include/stats.h
+	include/havok.h
+	include/events.h
+	include/render.h
+	include/osd.h
+	include/window.h
+	include/papyrus.h
+	include/misc.h
+)

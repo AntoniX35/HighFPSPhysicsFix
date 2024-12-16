@@ -1,0 +1,26 @@
+{
+  "name": "high-fps-physics-fix",
+  "version-string": "0.8.11",
+  "description": "",
+  "homepage": "",
+  "license": "MIT",
+  "dependencies": [
+    "boost-serialization",
+    "clib-util",
+    "frozen",
+    "robin-hood-hashing",
+    "fmt",
+    "directxtk",
+    "rsm-mmio",
+    "nowide",
+    "catch2",
+    "args",
+    "spdlog",
+    "srell",
+    "xbyak"
+  ],
+  "overrides": [
+    {"name":"boost-modular-build-helper","version":"1.84.0#3"}
+  ],
+  "builtin-baseline": "0c20b2a97c390e106150837042d921b0939e7ecb"
+}
